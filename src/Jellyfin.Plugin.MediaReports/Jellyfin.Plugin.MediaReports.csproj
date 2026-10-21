@@ -12,8 +12,8 @@
 
   <ItemGroup>
     <!-- The server provides these at runtime; never ship them in the plugin folder. -->
-    <PackageReference Include="Jellyfin.Controller" Version="12.*" ExcludeAssets="runtime" />
-    <PackageReference Include="Jellyfin.Model" Version="12.*" ExcludeAssets="runtime" />
+    <PackageReference Include="Jellyfin.Controller" Version="12.0.*" ExcludeAssets="runtime" />
+    <PackageReference Include="Jellyfin.Model" Version="12.0.*" ExcludeAssets="runtime" />
   </ItemGroup>
 
   <ItemGroup>

@@ -35,6 +35,7 @@ test:
   script:
     - dotnet build -c Release
     - dotnet test -c Release --no-build
+    - bash scripts/check-repo-docs.sh
 
 package:
   extends: [.dotnet, .release-tag]

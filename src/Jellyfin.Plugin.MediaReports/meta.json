@@ -1,0 +1,15 @@
+{
+  "category": "General",
+  "changelog": "",
+  "description": "Lets users report problems with a movie, show, season or episode, with playback diagnostics attached, and gives the admin a place to triage them.",
+  "guid": "3a96edc1-4775-492e-ba6c-c0d8abc88662",
+  "name": "Media Reports",
+  "overview": "Report playback and media problems to the server admin",
+  "owner": "jellyfin-plugin-media-reports",
+  "targetAbi": "12.0.0.0",
+  "timestamp": "2026-10-21T00:00:00Z",
+  "version": "0.1.0.0",
+  "status": "Active",
+  "autoUpdate": false,
+  "assemblies": []
+}

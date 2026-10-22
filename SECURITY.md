@@ -6,7 +6,7 @@ Only the latest release receives security fixes. The plugin supports Jellyfin 12
 
 ## Reporting a vulnerability
 
-Please report it privately through a [confidential issue](https://gitlab.com/path-immersive/open-source/jellyfin/jellyfin-plugin-media-reports/-/issues/new?issue[confidential]=true) on this project. Only you and the project maintainers can read it. Do not open a public issue or merge request for a vulnerability.
+Please report it privately through [GitHub private vulnerability reporting](https://github.com/pathimmersive/jellyfin-plugin-media-reports/security/advisories/new) (the **Security** tab, then **Report a vulnerability**). Only you and the project maintainers can read it. Do not open a public issue or pull request for a vulnerability.
 
 Include:
 

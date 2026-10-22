@@ -33,7 +33,7 @@ The key advantage of doing this as a plugin is that the server already knows how
 4. Reports store the Jellyfin item ID plus provider IDs (TMDb/TVDb/IMDb), season/episode numbers, and the original file path. Jellyfin item IDs are derived from the file path, so a Radarr/Sonarr upgrade that renames a file creates a new item; reports must re-link to the replacement.
 5. Jellyfin 12.0 has no built-in notification system and the Webhook plugin cannot carry custom plugin events, so the plugin sends its own webhooks.
 6. The report page authenticates with the signed-in user's existing jellyfin-web session; admin endpoints require the `RequiresElevation` policy.
-7. Distribution is a self-hosted Jellyfin plugin repository `manifest.json` (GitLab Pages) with release artifacts and checksums produced by CI.
+7. Distribution is a self-hosted Jellyfin plugin repository `manifest.json` (GitHub Pages) with release artifacts and checksums produced by CI.
 
 ## Open Source Considerations
 1. The repository is public and licensed GPL-3.0-or-later, consistent with the Jellyfin plugin template and the GPL licensing of the Jellyfin libraries the plugin links against.

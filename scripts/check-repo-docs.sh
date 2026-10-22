@@ -32,7 +32,7 @@ contains() {
 
 echo "== required files"
 for file in README.md LICENSE CONTRIBUTING.md CODE_OF_CONDUCT.md SECURITY.md THIRD_PARTY_NOTICES.md \
-  .gitlab/issue_templates/Bug.md .gitlab/issue_templates/Feature.md .gitlab/merge_request_templates/Default.md; do
+  .github/ISSUE_TEMPLATE/bug.md .github/ISSUE_TEMPLATE/feature.md .github/pull_request_template.md; do
   [[ -s "$file" ]] || fail "$file is missing or empty"
 done
 
@@ -41,7 +41,7 @@ if [[ -s README.md ]]; then
   contains README.md "unofficial" "say the plugin is unofficial"
   contains README.md "not affiliated with or endorsed by the Jellyfin project" "say the plugin is not endorsed by Jellyfin"
   contains README.md "Jellyfin 12\.0" "name the supported Jellyfin versions"
-  contains README.md "manifest\.json" "give the plugin repository URL"
+  contains README.md "https://pathimmersive\.github\.io/jellyfin-plugin-media-reports/manifest\.json" "give the plugin repository URL"
 fi
 if [[ -s CONTRIBUTING.md ]]; then
   contains CONTRIBUTING.md "dotnet test" "name the test command"
@@ -55,7 +55,7 @@ if [[ -s CODE_OF_CONDUCT.md ]]; then
 fi
 for file in SECURITY.md CODE_OF_CONDUCT.md; do
   [[ -s "$file" ]] || continue
-  contains "$file" "issue\[confidential\]=true" "send reports to a confidential issue"
+  contains "$file" "github\.com/pathimmersive/jellyfin-plugin-media-reports/security/advisories/new" "send reports to private vulnerability reporting"
   if grep -Eq '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' "$file"; then
     fail "$file contains an email address"
   fi

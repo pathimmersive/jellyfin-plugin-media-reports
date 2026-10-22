@@ -17,7 +17,7 @@ Once the first release is published:
 1. In the Jellyfin dashboard, open **Plugins → Repositories** and add this repository URL:
 
    ```
-   https://path-immersive.gitlab.io/open-source/jellyfin/jellyfin-plugin-media-reports/manifest.json
+   https://pathimmersive.github.io/jellyfin-plugin-media-reports/manifest.json
    ```
 
 2. Open **Plugins → Catalog**, install **Media Reports**, and restart the server.

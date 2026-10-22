@@ -7,9 +7,9 @@
 //     and <out>/media-reports_<version>.json, the manifest entry for that zip.
 //
 //   dotnet run scripts/release-tool.cs -- manifest --meta <meta.json> --out <manifest.json>
-//       (--entries <dir> | --gitlab)
+//       (--entries <dir> | --github)
 //     Writes manifest.json from the entry files in <dir>, or from the entry file attached
-//     to every GitLab Release of the project (CI_API_V4_URL and CI_PROJECT_ID).
+//     to every GitHub Release of the repository (GITHUB_REPOSITORY, and GITHUB_TOKEN if set).
 
 using System.IO.Compression;
 using System.Security.Cryptography;
@@ -123,13 +123,13 @@ async Task Manifest(Dictionary<string, string> options)
             .Select(ReadJsonObject)
             .ToList();
     }
-    else if (options.ContainsKey("gitlab"))
+    else if (options.ContainsKey("github"))
     {
-        entries = await ReadGitLabEntries();
+        entries = await ReadGitHubEntries();
     }
     else
     {
-        throw new ArgumentException("manifest needs --entries <dir> or --gitlab");
+        throw new ArgumentException("manifest needs --entries <dir> or --github");
     }
 
     var versions = new JsonArray();
@@ -163,19 +163,28 @@ async Task Manifest(Dictionary<string, string> options)
     Console.WriteLine($"{outPath}: {versions.Count} version(s)");
 }
 
-async Task<List<JsonObject>> ReadGitLabEntries()
+async Task<List<JsonObject>> ReadGitHubEntries()
 {
-    var api = Environment.GetEnvironmentVariable("CI_API_V4_URL")
-        ?? throw new ArgumentException("CI_API_V4_URL is not set");
-    var project = Environment.GetEnvironmentVariable("CI_PROJECT_ID")
-        ?? throw new ArgumentException("CI_PROJECT_ID is not set");
+    var api = (Environment.GetEnvironmentVariable("GITHUB_API_URL") ?? "https://api.github.com").TrimEnd('/');
+    var repository = Environment.GetEnvironmentVariable("GITHUB_REPOSITORY")
+        ?? throw new ArgumentException("GITHUB_REPOSITORY is not set");
+    var token = Environment.GetEnvironmentVariable("GITHUB_TOKEN");
 
     using var http = new HttpClient();
+    http.DefaultRequestHeaders.UserAgent.ParseAdd("media-reports-release-tool");
     var entries = new List<JsonObject>();
     for (var page = 1; ; page++)
     {
-        var releases = JsonNode.Parse(await http.GetStringAsync(
-            $"{api}/projects/{project}/releases?per_page=100&page={page}"))!.AsArray();
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"{api}/repos/{repository}/releases?per_page=100&page={page}");
+        request.Headers.Accept.ParseAdd("application/vnd.github+json");
+        if (!string.IsNullOrEmpty(token))
+        {
+            request.Headers.Authorization = new("Bearer", token);
+        }
+
+        using var response = await http.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        var releases = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsArray();
         if (releases.Count == 0)
         {
             break;
@@ -183,15 +192,23 @@ async Task<List<JsonObject>> ReadGitLabEntries()
 
         foreach (var release in releases)
         {
-            var link = release!["assets"]?["links"]?.AsArray()
-                .FirstOrDefault(l => l!["name"]!.GetValue<string>().EndsWith(".json", StringComparison.Ordinal));
-            if (link is null)
+            if (release!["draft"]?.GetValue<bool>() == true)
+            {
+                continue;
+            }
+
+            var asset = release["assets"]?.AsArray()
+                .FirstOrDefault(a => a!["name"]!.GetValue<string>() is var name
+                    && name.StartsWith($"{PackageName}_", StringComparison.Ordinal)
+                    && name.EndsWith(".json", StringComparison.Ordinal));
+            if (asset is null)
             {
                 Console.Error.WriteLine($"release-tool: skipping release {release["tag_name"]} with no manifest entry");
                 continue;
             }
 
-            var url = (link["direct_asset_url"] ?? link["url"])!.GetValue<string>();
+            // The download redirects to GitHub's asset storage; it needs no token for a public repository.
+            var url = asset["browser_download_url"]!.GetValue<string>();
             entries.Add(JsonNode.Parse(await http.GetStringAsync(url))!.AsObject());
         }
     }

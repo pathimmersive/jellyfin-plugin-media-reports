@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping. Bug reports, ideas and merge requests are all welcome.
+Thanks for helping. Bug reports, ideas and pull requests are all welcome.
 
 ## Reporting
 
@@ -23,9 +23,9 @@ The scripts start their own throwaway Jellyfin containers. Test against a local 
 
 The plugin builds against the lowest Jellyfin version it supports (`Jellyfin.Controller` 12.0.*). Don't raise that to use a newer API without raising `targetAbi` in `meta.json` too.
 
-## Merge requests
+## Pull requests
 
-- Keep each merge request to one change, with tests or a check that proves it.
+- Keep each pull request to one change, with tests or a check that proves it.
 - Write commit subjects in the [Conventional Commits](https://www.conventionalcommits.org/) style: `feat: ...`, `fix: ...`, `docs: ...`, `build: ...`, `chore: ...`.
 - If you add a dependency that ships with the plugin, add it to [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) with its license. Only licenses compatible with GPL-3.0 are accepted; `scripts/check-repo-docs.sh` fails otherwise.
 - Don't add the Jellyfin logo or anything that suggests the Jellyfin project endorses this plugin.

@@ -1,0 +1,29 @@
+# Checks that the pull request title is a Conventional Commits subject. The title
+# becomes the commit message when the pull request is squash-merged.
+name: PR title
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  pr-title:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Title is a Conventional Commits subject of at most 72 characters
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          pattern='^(feat|fix|docs|build|ci|chore|refactor|perf|test|style|revert)(\([a-z0-9-]+\))?!?: [^ ].*[^.]$'
+          if ! grep -qE "$pattern" <<<"$TITLE"; then
+            echo "::error::Use a Conventional Commits title, e.g. 'fix: keep the subtitle choice after a transcode'"
+            exit 1
+          fi
+          if (( ${#TITLE} > 72 )); then
+            echo "::error::The title is ${#TITLE} characters; keep it to 72"
+            exit 1
+          fi

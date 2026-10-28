@@ -36,3 +36,6 @@ jobs:
           global-json-file: global.json
       # Loads the plugin into Jellyfin 12.0, 12.1 and 12.2 containers on the runner's Docker.
       - run: bash scripts/smoke-load.sh
+      # Plays a generated movie on Jellyfin 12 with a forced transcode and checks the
+      # playbacks the plugin serves during playback and after the stop.
+      - run: bash scripts/smoke-playback.sh

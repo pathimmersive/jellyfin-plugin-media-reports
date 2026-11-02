@@ -43,6 +43,8 @@ jobs:
       - run: bash scripts/smoke-storage.sh
       # Files reports through the report API as two users and checks every refusal.
       - run: bash scripts/smoke-report.sh
+      # Works issues through the admin issues API: access, grouping, status rules, Refresh and Scan.
+      - run: bash scripts/smoke-admin.sh
       # Drives Jellyfin Web in headless Chromium and checks where the Report button appears.
       - name: Install Playwright for the web smoke
         run: |

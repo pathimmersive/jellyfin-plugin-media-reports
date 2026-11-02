@@ -80,7 +80,7 @@ docker start "$container" >/dev/null
 port="$(docker port "$container" 8096/tcp | head -n 1 | sed 's/.*://')"
 api="http://127.0.0.1:$port"
 deadline=$((SECONDS + timeout))
-until docker logs "$container" 2>&1 | grep -q "Startup complete"; do
+until docker logs "$container" 2>&1 | grep "Startup complete" >/dev/null; do
   (( SECONDS < deadline )) || { docker logs --tail 50 "$container" 2>&1; fail "the server did not start"; }
   sleep 2
 done
@@ -193,7 +193,7 @@ print(json.dumps(d))" "$work/results/config.json" "$1")"
   ok "admin box" "$admin" POST "/Plugins/$plugin_id/Configuration" "$cfg" >/dev/null
 }
 set_config on
-ok "Alice Phone" "$alice_phone" GET "/MediaReports/Report/Context?itemId=$item_id" | json "'metadata' in [r['Code'] for r in d['Reasons']]" | grep -qx False \
+ok "Alice Phone" "$alice_phone" GET "/MediaReports/Report/Context?itemId=$item_id" | json "'metadata' in [r['Code'] for r in d['Reasons']]" | grep -x False >/dev/null \
   || fail "a retired reason is still offered"
 expect 400 reason-not-allowed "Alice Phone" "$alice_phone" POST /MediaReports/Report "{\"itemId\":\"$item_id\",\"reasonCode\":\"metadata\"}"
 set_config off

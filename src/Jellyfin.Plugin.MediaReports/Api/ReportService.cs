@@ -1,0 +1,222 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using Jellyfin.Plugin.MediaReports.Configuration;
+using Jellyfin.Plugin.MediaReports.Playback;
+using Jellyfin.Plugin.MediaReports.Storage;
+using MediaBrowser.Controller.Entities;
+using MediaBrowser.Controller.Entities.Movies;
+using MediaBrowser.Controller.Entities.TV;
+using MediaBrowser.Controller.Library;
+
+namespace Jellyfin.Plugin.MediaReports.Api;
+
+/// <summary>
+/// The rules for filing a report: what may be reported, which playback is attached,
+/// and when a report is refused. Callers only ever act as themselves.
+/// </summary>
+public sealed class ReportService
+{
+    /// <summary>
+    /// The longest note a reporter can send.
+    /// </summary>
+    public const int MaxNoteLength = 1000;
+
+    private readonly ILibraryManager _library;
+    private readonly IUserManager _users;
+    private readonly PlaybackCapture _capture;
+    private readonly ReportStore _store;
+    private readonly Func<PluginConfiguration> _config;
+    private readonly TimeProvider _time;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ReportService"/> class.
+    /// </summary>
+    /// <param name="library">The library manager.</param>
+    /// <param name="users">The user manager.</param>
+    /// <param name="capture">The recent playbacks.</param>
+    /// <param name="store">The report store.</param>
+    /// <param name="config">Returns the current configuration; read on every call.</param>
+    /// <param name="time">The clock.</param>
+    public ReportService(ILibraryManager library, IUserManager users, PlaybackCapture capture, ReportStore store, Func<PluginConfiguration> config, TimeProvider time)
+    {
+        _library = library;
+        _users = users;
+        _capture = capture;
+        _store = store;
+        _config = config;
+        _time = time;
+    }
+
+    /// <summary>
+    /// Describes what the caller is about to report.
+    /// </summary>
+    /// <param name="userId">The caller.</param>
+    /// <param name="deviceId">The caller's device, preferred when several playbacks are live.</param>
+    /// <param name="itemId">The title.</param>
+    /// <returns>The context, or a refusal.</returns>
+    public ServiceResult<ReportContext> GetContext(Guid userId, string? deviceId, Guid itemId)
+    {
+        var config = _config();
+        if (!config.ReportingEnabled)
+        {
+            return ReportingOff<ReportContext>();
+        }
+
+        var item = FindItem(userId, itemId);
+        if (item is null)
+        {
+            return NotFound<ReportContext>();
+        }
+
+        var reasons = config.GetReasons();
+        var playback = PickPlayback(userId, deviceId, item);
+        return ServiceResult<ReportContext>.Success(new ReportContext
+        {
+            ItemId = item.Id,
+            Name = item.Name,
+            Type = TypeName(item),
+            Reasons = reasons.Where(r => !r.Retired).Select(r => new ReasonOption(r.Code, r.Label)).ToList(),
+            OpenReports = _store.GetOpenReports(userId, item.Id)
+                .Select(r => new OpenReport(r.ReportId, r.ReasonCode, Label(reasons, r.ReasonCode), r.Status.ToString()))
+                .ToList(),
+            Playback = Describe(playback),
+        });
+    }
+
+    /// <summary>
+    /// Files a report, attaching the playback the server picks.
+    /// </summary>
+    /// <param name="userId">The caller.</param>
+    /// <param name="deviceId">The caller's device.</param>
+    /// <param name="request">The report.</param>
+    /// <returns>The filed report, or a refusal.</returns>
+    public ServiceResult<FiledReportView> File(Guid userId, string? deviceId, FileReportRequest request)
+    {
+        var config = _config();
+        if (!config.ReportingEnabled)
+        {
+            return ReportingOff<FiledReportView>();
+        }
+
+        var item = FindItem(userId, request.ItemId);
+        if (item is null)
+        {
+            return NotFound<FiledReportView>();
+        }
+
+        if (!config.GetReasons().Any(r => !r.Retired && string.Equals(r.Code, request.ReasonCode, StringComparison.Ordinal)))
+        {
+            return ServiceResult<FiledReportView>.Refuse(Outcome.BadRequest, "reason-not-allowed", "That reason isn't on offer.");
+        }
+
+        var note = string.IsNullOrWhiteSpace(request.Note) ? null : request.Note.Trim();
+        if (note is { Length: > MaxNoteLength })
+        {
+            return ServiceResult<FiledReportView>.Refuse(Outcome.BadRequest, "note-too-long", $"The note is longer than {MaxNoteLength} characters.");
+        }
+
+        if (_store.GetOpenReports(userId, item.Id).Any(r => string.Equals(r.ReasonCode, request.ReasonCode, StringComparison.Ordinal)))
+        {
+            return ServiceResult<FiledReportView>.Refuse(Outcome.Conflict, "already-reported", "You already have an open report on this title for that reason.");
+        }
+
+        var playback = PickPlayback(userId, deviceId, item);
+        var series = item switch
+        {
+            Episode e => _library.GetItemById(e.SeriesId),
+            Season s => _library.GetItemById(s.SeriesId),
+            _ => null,
+        };
+        var file = item is Movie or Episode && !string.IsNullOrEmpty(item.Path) && System.IO.File.Exists(item.Path)
+            ? new FileInfo(item.Path)
+            : null;
+
+        var filed = _store.AddReport(new NewReport
+        {
+            ReporterUserId = userId,
+            ReporterName = _users.GetUserById(userId)?.Username,
+            ItemId = item.Id,
+            ItemType = TypeName(item),
+            ItemName = item.Name,
+            ProviderIds = new Dictionary<string, string>(item.ProviderIds ?? []),
+            SeriesId = series?.Id,
+            SeriesName = series?.Name ?? (item as IHasSeries)?.SeriesName,
+            SeriesProviderIds = new Dictionary<string, string>(series?.ProviderIds ?? []),
+            SeasonNumber = item switch
+            {
+                Episode e => e.ParentIndexNumber,
+                Season s => s.IndexNumber,
+                _ => null,
+            },
+            EpisodeNumber = (item as Episode)?.IndexNumber,
+            FilePath = item.Path,
+            FileSize = file?.Length,
+            FileModified = file is null ? null : new DateTimeOffset(file.LastWriteTimeUtc, TimeSpan.Zero),
+            ReasonCode = request.ReasonCode,
+            Note = note,
+            Snapshot = playback is null ? null : ReportSnapshot.FromPlayback(playback),
+        });
+
+        var issue = _store.GetIssue(filed.IssueId)!;
+        return ServiceResult<FiledReportView>.Success(new FiledReportView
+        {
+            Id = filed.ReportId,
+            IssueId = filed.IssueId,
+            ItemId = item.Id,
+            ReasonCode = request.ReasonCode,
+            Status = issue.Status.ToString(),
+            CreatedAt = _time.GetUtcNow(),
+            Playback = Describe(playback),
+        });
+    }
+
+    private BaseItem? FindItem(Guid userId, Guid itemId)
+    {
+        var user = _users.GetUserById(userId);
+        if (user is null)
+        {
+            return null;
+        }
+
+        var item = _library.GetItemById<BaseItem>(itemId, user);
+        return item is Movie or Episode or Season or Series ? item : null;
+    }
+
+    // A movie or episode carries the caller's live playback of it, preferring the calling
+    // device, else their newest buffered one; a season or series carries none.
+    private PlaybackEntry? PickPlayback(Guid userId, string? deviceId, BaseItem item)
+    {
+        if (item is not (Movie or Episode))
+        {
+            return null;
+        }
+
+        var playbacks = _capture.GetPlaybacks(userId).Where(p => p.ItemId == item.Id).ToList();
+        return playbacks.FirstOrDefault(p => p.State == PlaybackState.Playing && deviceId is not null && string.Equals(p.DeviceId, deviceId, StringComparison.Ordinal))
+            ?? playbacks.FirstOrDefault(p => p.State == PlaybackState.Playing)
+            ?? playbacks.FirstOrDefault();
+    }
+
+    private static AttachedPlayback? Describe(PlaybackEntry? playback) =>
+        playback is null ? null : new AttachedPlayback(playback.DeviceName, playback.Client, playback.State.ToString(), playback.LastSeen);
+
+    private static string Label(IEnumerable<ReasonEntry> reasons, string code) =>
+        reasons.FirstOrDefault(r => string.Equals(r.Code, code, StringComparison.Ordinal))?.Label ?? code;
+
+    private static string TypeName(BaseItem item) => item switch
+    {
+        Movie => "Movie",
+        Episode => "Episode",
+        Season => "Season",
+        Series => "Series",
+        _ => item.GetType().Name,
+    };
+
+    private static ServiceResult<T> ReportingOff<T>() =>
+        ServiceResult<T>.Refuse(Outcome.Forbidden, "reporting-off", "Reporting is switched off on this server.");
+
+    private static ServiceResult<T> NotFound<T>() =>
+        ServiceResult<T>.Refuse(Outcome.NotFound, "item-not-found", "That title isn't in your library.");
+}

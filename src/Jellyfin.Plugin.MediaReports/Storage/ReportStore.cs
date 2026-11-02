@@ -357,6 +357,27 @@ public sealed class ReportStore
     }
 
     /// <summary>
+    /// Gets a user's reports on an item whose issue is still open, with the issue's status.
+    /// </summary>
+    /// <param name="userId">The reporter.</param>
+    /// <param name="itemId">The item.</param>
+    /// <returns>The reports, newest first.</returns>
+    public IReadOnlyList<(long ReportId, string ReasonCode, IssueStatus Status)> GetOpenReports(Guid userId, Guid itemId)
+    {
+        using var connection = _db.OpenConnection();
+        return Rows(
+            connection,
+            """
+            SELECT r.id, r.reason_code, i.status FROM report r JOIN issue i ON i.id = r.issue_id
+            WHERE r.reporter_user_id = $user AND r.item_id = $item AND i.closed_at IS NULL
+            ORDER BY r.created_at DESC, r.id DESC
+            """,
+            r => (r.GetInt64(0), r.GetString(1), Enum.Parse<IssueStatus>(r.GetString(2))),
+            ("$user", Id(userId)),
+            ("$item", Id(itemId)));
+    }
+
+    /// <summary>
     /// Gets how many reports are stored.
     /// </summary>
     /// <returns>The count.</returns>

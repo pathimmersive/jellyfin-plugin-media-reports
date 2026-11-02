@@ -43,3 +43,12 @@ jobs:
       - run: bash scripts/smoke-storage.sh
       # Files reports through the report API as two users and checks every refusal.
       - run: bash scripts/smoke-report.sh
+      # Drives Jellyfin Web in headless Chromium and checks where the Report button appears.
+      - name: Install Playwright for the web smoke
+        run: |
+          python3 -m venv artifacts/playwright
+          artifacts/playwright/bin/pip install --quiet playwright==1.64.1
+          artifacts/playwright/bin/python -m playwright install --with-deps chromium
+      - run: bash scripts/smoke-web.sh
+        env:
+          SMOKE_PYTHON: artifacts/playwright/bin/python

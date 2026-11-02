@@ -19,6 +19,15 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Jellyfin.Plugin.MediaReports.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The Report button script runs in jellyfin-web and is served at /MediaReports/web/reporter.js. -->
+    <EmbeddedResource Include="Web/reporter.js" LogicalName="reporter.js" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Include="meta.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 

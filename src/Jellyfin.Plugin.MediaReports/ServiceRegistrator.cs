@@ -4,9 +4,11 @@ using Jellyfin.Plugin.MediaReports.Api;
 using Jellyfin.Plugin.MediaReports.Configuration;
 using Jellyfin.Plugin.MediaReports.Playback;
 using Jellyfin.Plugin.MediaReports.Storage;
+using Jellyfin.Plugin.MediaReports.Web;
 using MediaBrowser.Controller.Events;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Plugins;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Jellyfin.Plugin.MediaReports;
@@ -36,5 +38,6 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
             () => Plugin.Instance?.Configuration ?? new PluginConfiguration(),
             TimeProvider.System));
         serviceCollection.AddScoped<IEventConsumer<UserDeletedEventArgs>, UserDeletedConsumer>();
+        serviceCollection.AddTransient<IStartupFilter, IndexPageStartupFilter>();
     }
 }

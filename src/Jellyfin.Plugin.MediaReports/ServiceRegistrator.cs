@@ -1,4 +1,8 @@
+using System;
+using Jellyfin.Data.Events.Users;
 using Jellyfin.Plugin.MediaReports.Playback;
+using Jellyfin.Plugin.MediaReports.Storage;
+using MediaBrowser.Controller.Events;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Plugins;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,5 +19,13 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
     {
         serviceCollection.AddSingleton<PlaybackCapture>();
         serviceCollection.AddHostedService(provider => provider.GetRequiredService<PlaybackCapture>());
+
+        serviceCollection.AddSingleton<ReportDatabase>();
+        serviceCollection.AddSingleton(provider => new ReportStore(
+            provider.GetRequiredService<ReportDatabase>(),
+            TimeProvider.System,
+            () => Plugin.Instance?.Configuration.ReportRetentionDays ?? 365));
+        serviceCollection.AddHostedService<StorageStartup>();
+        serviceCollection.AddScoped<IEventConsumer<UserDeletedEventArgs>, UserDeletedConsumer>();
     }
 }

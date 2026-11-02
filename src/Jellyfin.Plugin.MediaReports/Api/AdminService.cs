@@ -302,7 +302,7 @@ public sealed class AdminService
             ImageRefreshMode = MetadataRefreshMode.Default,
             IsAutomated = false,
         }, RefreshPriority.High);
-        return "Scan library: " + target.Name;
+        return "Rescan: " + target.Name;
     });
 
     /// <summary>

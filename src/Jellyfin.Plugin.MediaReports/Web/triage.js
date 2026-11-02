@@ -32,6 +32,7 @@ const STYLES = `
 .mrTabs{display:flex;flex-wrap:wrap;border-bottom:1px solid rgba(255,255,255,.12)}
 .mrTab{height:48px;display:inline-flex;align-items:center;padding:0 16px;color:#fff !important;text-decoration:none;font-weight:600;font-size:14px;border-bottom:2px solid var(--mr-accent)}
 .mrTab .mrCount{margin-left:8px;color:var(--mr-muted);font-weight:400}
+.mrTabs+.mrControls{margin-top:18px}
 .mrControls{display:flex;flex-wrap:wrap;align-items:center;margin:-6px -10px}
 .mrControls>*{margin:6px 10px}
 .mrSegs{display:flex}
@@ -83,6 +84,7 @@ const STYLES = `
 .mrActions{display:flex;flex-wrap:wrap;margin:-4px}
 .mrActions>*{margin:4px}
 .mrBack{display:inline-flex;align-items:center;font-size:14px;text-decoration:none;align-self:flex-start}
+.mediaReportsIssue>*+*{margin-top:24px}
 .mrIssueHead{display:flex;flex-wrap:wrap;align-items:flex-start;margin:-10px}
 .mrIssueHead>*{margin:10px}
 .mrIssueHead .mrPoster{width:96px;height:144px;border-radius:4px}
@@ -90,17 +92,17 @@ const STYLES = `
 .mrIssueTitle>*+*{margin-top:10px}
 .mrIssueTitle h1{margin:0;font-size:30px;font-weight:400;color:#fff}
 .mrIssueTitle p{margin:0}
-.mrStatusBox{flex:0 1 280px;display:flex;flex-direction:column}
-.mrStatusBox>*+*{margin-top:6px}
-.mrStatusBox select{height:44px;font-size:15px}
 .mrOk{color:#8fd193;font-size:13px}
 .mrBad{color:#ffb4ab;font-size:13px}
-.mrColumns{display:flex;flex-wrap:wrap;align-items:flex-start;margin:-10px}
-.mrColumns>*{margin:10px;min-width:0}
-.mrReports{flex:999 1 520px;display:flex;flex-direction:column}
-.mrReports>*+*{margin-top:12px}
-.mrAside{flex:1 1 340px;display:flex;flex-direction:column}
-.mrAside>*+*{margin-top:20px}
+.mrSection{display:flex;flex-direction:column;min-width:0}
+.mrSection>*+*{margin-top:12px}
+.mrTriage{display:grid;grid-template-columns:minmax(220px,1fr) 2fr;grid-gap:20px;align-items:start}
+.mrField{display:flex;flex-direction:column}
+.mrField>*+*{margin-top:6px}
+.mrField select{height:44px;font-size:15px;width:100%}
+.mrField .mrBtn{align-self:flex-start}
+.mrColumns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-gap:20px;align-items:start}
+@media (max-width:900px){.mrColumns,.mrTriage{grid-template-columns:minmax(0,1fr)}}
 .mrCard{background:var(--mr-card);border-radius:8px;padding:20px}
 .mrCard>*+*{margin-top:12px}
 .mrH3{margin:0;font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mr-muted)}
@@ -541,7 +543,7 @@ function fileCard(issue) {
     };
     if (!file.InLibrary) {
         add('Path', file.Path, true);
-        return h('section', { className: 'mrCard mrFile' }, h('h2', { className: 'mrH3' }, 'File'),
+        return h('div', { className: 'mrCard mrFile' },
             h('p', { className: 'mrBad', style: 'margin:0;font-size:14px' }, 'This title is no longer in the library.'), dl);
     }
     if (issue.ItemType === 'Season' || issue.ItemType === 'Series') {
@@ -562,7 +564,7 @@ function fileCard(issue) {
         }
         add('Subtitles', subtitles.length ? subtitles.join(', ') : 'none');
     }
-    return h('section', { className: 'mrCard mrFile' }, h('h2', { className: 'mrH3' }, 'File'), dl);
+    return h('div', { className: 'mrCard mrFile' }, dl);
 }
 
 // jellyfin-web keeps earlier views in the page, so ids are made unique per view.
@@ -617,9 +619,12 @@ function issuePage(params, issue, navigate) {
     }
 
     const jellyfinUrl = `${ApiClient.serverAddress()}/web/#/details?id=${issue.ItemId}&serverId=${issue.ServerId}`;
+    // Laid out in the order an issue is worked: decide (status, notes), read the reports,
+    // check the file, then the history.
+    const section = (title, className, ...content) => h('section', { className: `mrSection ${className}` }, h('h2', { className: 'mrH3' }, title), content);
     return h('div', { className: 'mediaReportsIssue', 'data-issue': issue.Id, style: 'display:flex;flex-direction:column' },
         back,
-        h('div', { className: 'mrIssueHead', style: 'margin-top:10px' },
+        h('div', { className: 'mrIssueHead' },
             poster(issue.ItemId),
             h('div', { className: 'mrIssueTitle' },
                 h('h1', null, issue.Title),
@@ -628,26 +633,23 @@ function issuePage(params, issue, navigate) {
                 inLibrary ? h('div', { className: 'mrActions' },
                     h('a', { className: 'mrBtn', href: jellyfinUrl, target: '_blank', rel: 'noopener' }, icon('open_in_new'), 'Open in Jellyfin'),
                     h('button', { type: 'button', className: 'mrBtn', onclick: action('Refresh', 'Refresh started') }, icon('refresh'), 'Refresh metadata'),
-                    h('button', { type: 'button', className: 'mrBtn', onclick: action('Scan', 'Scan started') }, icon('sync'), 'Scan library')) : null,
-                message),
-            h('div', { className: 'mrStatusBox' },
+                    h('button', { type: 'button', className: 'mrBtn', title: "Look for new or changed files in this title's folder", onclick: action('Scan', 'Rescan started') }, icon('sync'), 'Rescan')) : null,
+                message)),
+        section('Triage', 'mrTriageSection', h('div', { className: 'mrCard mrTriage' },
+            h('div', { className: 'mrField' },
                 h('label', { for: statusId, className: 'mrFaint' }, 'Status'),
                 statusSelect,
-                h('span', { className: 'mrFaint', style: 'font-size:12px' }, `Closing notifies the ${plural(issue.People, 'person', 'people')} who reported it.`))),
-        h('div', { className: 'mrColumns', style: 'margin-top:10px' },
-            h('section', { className: 'mrReports', 'aria-label': 'Reports' },
-                h('h2', { className: 'mrH3' }, 'Reports'),
-                reports.map(reportCard)),
-            h('aside', { className: 'mrAside' },
-                h('section', { className: 'mrCard mrNotesCard' },
-                    h('h2', { className: 'mrH3' }, h('label', { for: notesId }, 'Notes (only admins see them)')),
-                    notes,
-                    saveNotes),
-                fileCard(issue),
-                h('section', { className: 'mrCard mrHistoryCard' },
-                    h('h2', { className: 'mrH3' }, 'History'),
-                    h('ol', { className: 'mrHistory' }, issue.History.map((event) =>
-                        h('li', null, h('span'), h('span', null, historyLine(event)), h('time', { datetime: event.At }, stamp(event.At)))))))));
+                h('span', { className: 'mrFaint', style: 'font-size:12px' }, `Closing notifies the ${plural(issue.People, 'person', 'people')} who reported it.`)),
+            h('div', { className: 'mrField mrNotesCard' },
+                h('label', { for: notesId, className: 'mrFaint' }, 'Notes (only admins see them)'),
+                notes,
+                saveNotes))),
+        h('div', { className: 'mrColumns' },
+            section(`Reports (${reports.length})`, 'mrReports', reports.map(reportCard)),
+            section('File', 'mrFileSection', fileCard(issue))),
+        section('History', 'mrHistorySection', h('div', { className: 'mrCard mrHistoryCard' },
+            h('ol', { className: 'mrHistory' }, issue.History.map((event) =>
+                h('li', null, h('span'), h('span', null, historyLine(event)), h('time', { datetime: event.At }, stamp(event.At))))))));
 }
 
 // ---- The page --------------------------------------------------------------------------

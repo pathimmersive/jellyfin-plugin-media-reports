@@ -336,6 +336,9 @@ with sync_playwright() as p:
     open_page(page)
     wait_rows(page, 5)
     check(not any(r["dot"] for r in rows(page)), "reopening the tab with no new reports shows no dots")
+    gap = page.evaluate("""() => { const v = document.querySelector('.page:not(.hide) .mediaReportsTriage');
+        return v.querySelector('.mrControls').getBoundingClientRect().top - v.querySelector('.mrTabs').getBoundingClientRect().bottom; }""")
+    check(gap >= 16, "the filters sit apart from the tabs (%dpx)" % gap)
 
     # Season row: expand, Set status for all.
     page.locator(V + "tr.mrSeasonRow button.mrTitleLink").click()
@@ -397,6 +400,16 @@ with sync_playwright() as p:
     issue_url = page.url
     head = text(page, ".mrIssueSummary")
     check(re.match(r"^Stutter or jitter · 3 reports from 3 people · first .+, last .+$", head or ""), "the issue's header (%s)" % head)
+    layout = page.evaluate("""() => { const v = document.querySelector('.page:not(.hide) .mediaReportsIssue');
+        const box = (sel) => v.querySelector(sel).getBoundingClientRect();
+        return { headers: [box('.mrReports > .mrH3').top, box('.mrFileSection > .mrH3').top],
+                 cards: [box('.mrReports > .mrReport').top, box('.mrFile').top],
+                 widths: [box('.mrReports').width, box('.mrFileSection').width],
+                 triage: box('.mrTriageSection').bottom <= box('.mrReports').top,
+                 select: box('.mrStatusSelect').width === box('.mrTriage .mrField').width }; }""")
+    check(abs(layout["headers"][0] - layout["headers"][1]) < 1 and abs(layout["cards"][0] - layout["cards"][1]) < 1 and abs(layout["widths"][0] - layout["widths"][1]) < 2,
+          "Reports and File are equal columns whose headers and first cards line up (%s)" % layout)
+    check(layout["triage"] and layout["select"], "Triage, with a status menu as wide as its column, comes above the reports")
     cards = page.locator(V + ".mrReport")
     check(cards.count() == 3 and "Picture keeps jumping back" in cards.nth(2).inner_text(), "the issue lists its 3 reports newest first, with the note")
     cards.nth(2).locator("button.mrLinkBtn").click()
@@ -409,7 +422,7 @@ with sync_playwright() as p:
     check(history[0].startswith("Reported by alice") and len(history) == 3, "History lists the reports in order with who filed them")
     options = page.locator(V + ".mrStatusSelect option").all_inner_texts()
     check("Replaced – verify" not in options, "the status menu doesn't offer Replaced – verify")
-    check("Closing notifies the 3 people who reported it." in page.locator(V + ".mrStatusBox").inner_text(), "the status box says closing notifies the reporters")
+    check("Closing notifies the 3 people who reported it." in page.locator(V + ".mrTriage").inner_text(), "the status box says closing notifies the reporters")
     page.locator(V + "button", has_text="Refresh metadata").click()
     page.wait_for_function("() => (document.querySelector('.page:not(.hide) .mrMessage') || {}).textContent === 'Refresh started'", timeout=WAIT_MS)
     page.wait_for_function("() => [...document.querySelectorAll('.page:not(.hide) .mrHistory li')].some(l => l.textContent.startsWith('Refresh metadata'))", timeout=WAIT_MS)
@@ -439,10 +452,10 @@ with sync_playwright() as p:
     # A removed movie and a quick action on an episode.
     page.goto(API + PAGE + "&issue=%s" % season_issues[0])
     page.wait_for_selector(V + '.mediaReportsIssue[data-issue="%s"]' % season_issues[0], timeout=WAIT_MS)
-    page.locator(V + "button", has_text="Scan library").click()
-    page.wait_for_function("() => (document.querySelector('.page:not(.hide) .mrMessage') || {}).textContent === 'Scan started'", timeout=WAIT_MS)
-    page.wait_for_function("() => [...document.querySelectorAll('.page:not(.hide) .mrHistory li')].some(l => l.textContent.startsWith('Scan library: Season 1'))", timeout=WAIT_MS)
-    check(True, "Scan library on an episode scans its season folder and adds a history line")
+    page.locator(V + "button", has_text="Rescan").click()
+    page.wait_for_function("() => (document.querySelector('.page:not(.hide) .mrMessage') || {}).textContent === 'Rescan started'", timeout=WAIT_MS)
+    page.wait_for_function("() => [...document.querySelectorAll('.page:not(.hide) .mrHistory li')].some(l => l.textContent.startsWith('Rescan: Season 1'))", timeout=WAIT_MS)
+    check(True, "Rescan on an episode scans its season folder and adds a history line")
 
     gone_dir = os.path.join(cfg["library"], "movies", "Gone Movie (2026)")
     for name in os.listdir(gone_dir):
@@ -457,7 +470,7 @@ with sync_playwright() as p:
     page.goto(API + PAGE + "&issue=%s" % gone_issue)
     page.wait_for_selector(V + '.mediaReportsIssue[data-issue="%s"]' % gone_issue, timeout=WAIT_MS)
     file_text = text(page, ".mrFile")
-    check("This title is no longer in the library." in file_text and "Gone Movie (2026).mkv" in file_text and page.locator(V + "button", has_text="Scan library").count() == 0,
+    check("This title is no longer in the library." in file_text and "Gone Movie (2026).mkv" in file_text and page.locator(V + "button", has_text="Rescan").count() == 0,
           "a removed movie shows the stored path and hides the quick actions (%s)" % file_text.replace(chr(10), " | "))
 
     page.goto(API + PAGE + "&issue=%s" % series_issue)

@@ -335,7 +335,13 @@ REMOTE_BUTTONS_JS = """() => {
   const sendIdle = look(send), cancelFocused = look(cancel);
   send.focus();
   const sendFocused = look(send), cancelIdle = look(cancel);
+  const rows = [...d.querySelectorAll('.mediaReportsReason')].map(r => r.getBoundingClientRect());
+  const lefts = [...new Set(rows.map(r => Math.round(r.left)))];
+  const usesGap = [...d.querySelectorAll('*')].some(e => ['flex', 'grid'].includes(getComputedStyle(e).display)
+    && ['rowGap', 'columnGap'].some(g => !['normal', '0px'].includes(getComputedStyle(e)[g])));
   return {stacked: rc.top >= rs.bottom && Math.abs(rc.left - rs.left) < 1 && Math.abs(rc.width - rs.width) < 1,
+          apart: Math.round(rc.top - rs.bottom), usesGap, columns: lefts.length,
+          even: rows.every(r => Math.abs(r.width - rows[0].width) < 1 && Math.abs(r.height - rows[0].height) < 1),
           sendIdle, cancelFocused, sendFocused, cancelIdle};
 }"""
 
@@ -343,7 +349,9 @@ REMOTE_BUTTONS_JS = """() => {
 def remote_buttons(page, where):
     """With a remote, Send and Cancel are stacked and only the focused one is highlighted."""
     r = page.evaluate(REMOTE_BUTTONS_JS)
-    check(r["stacked"], where + ": Send and Cancel are stacked")
+    check(r["stacked"] and r["apart"] >= 8, where + ": Send and Cancel are stacked with space between them (%dpx)" % r["apart"])
+    check(r["columns"] == 2 and r["even"], where + ": the reasons are two columns of equal rows")
+    check(not r["usesGap"], where + ": spacing does not rely on flex gap, which older webOS browsers lack")
     check(r["sendIdle"] == r["cancelIdle"] and r["sendFocused"] == r["cancelFocused"] and r["sendIdle"] != r["sendFocused"],
           where + ": only the focused one of Send and Cancel is highlighted (%s)" % r)
 
@@ -474,6 +482,8 @@ def report_from_player(page, layout, sid):
     pick(page, "Poor quality", layout)
     if layout != "tv":
         page.locator(DIALOG + " .mediaReportsNote").type("Looks soft.")
+    else:
+        remote_buttons(page, where)
     send(page, layout)
     page.wait_for_function("() => !!document.querySelector('.mediaReportsSent')", timeout=WAIT_MS)
     check(not page.evaluate("() => document.querySelector('video').paused"), where + ": playback is not paused")

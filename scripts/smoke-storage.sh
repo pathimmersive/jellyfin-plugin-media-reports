@@ -74,7 +74,7 @@ start_server() {
   port="$(docker port "$container" 8096/tcp | head -n 1 | sed 's/.*://')"
   api="http://127.0.0.1:$port"
   local deadline=$((SECONDS + timeout))
-  until docker logs --since "$since" "$container" 2>&1 | grep -q "Startup complete"; do
+  until docker logs --since "$since" "$container" 2>&1 | grep "Startup complete" >/dev/null; do
     (( SECONDS < deadline )) || { docker logs --tail 50 "$container" 2>&1; fail "the server did not start"; }
     sleep 2
   done
@@ -119,7 +119,7 @@ run_task() {
   local name="$1" id
   id="$(call GET /ScheduledTasks | json "next((t['Id'] for t in d if t['Name'] == '$name'), None)")"
   [[ -n "$id" ]] || fail "scheduled task \"$name\" is not listed"
-  call GET /ScheduledTasks | json "next(t for t in d if t['Name'] == '$name')['Triggers'][0]['Type']" | grep -qx DailyTrigger \
+  call GET /ScheduledTasks | json "next(t for t in d if t['Name'] == '$name')['Triggers'][0]['Type']" | grep -x DailyTrigger >/dev/null \
     || fail "\"$name\" has no daily trigger"
   call POST "/ScheduledTasks/Running/$id" >/dev/null
   local deadline=$((SECONDS + timeout)) result=""
@@ -187,7 +187,7 @@ PY
 MSYS_NO_PATHCONV=1 docker cp "$(host_path "$seed")" "$container:$db_dir/media-reports.db"
 start_server
 token="$(sign_in admin admin-password)"
-if ! docker logs --since "$last_start" "$container" 2>&1 | grep -q "migrated to schema version 2"; then
+if ! docker logs --since "$last_start" "$container" 2>&1 | grep "migrated to schema version 2" >/dev/null; then
   docker logs --since "$last_start" "$container" 2>&1 | grep -i -E "media ?reports|sqlite|error" | tail -40
   fail "the version 1 database was not migrated"
 fi

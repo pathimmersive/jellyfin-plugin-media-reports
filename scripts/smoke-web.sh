@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Starts a real Jellyfin 12 server in Docker with the plugin, a generated movie and a short
 # series, then drives Jellyfin Web in a headless browser (Playwright for Python) at desktop
-# width, phone width and in the TV layout, checking where the Report button appears.
+# width, phone width and in the TV layout, as one user each: where the Report button
+# appears, and the report dialog it opens, from sending to what the server stored.
 #
 # Usage: scripts/smoke-web.sh [--without-plugin] [--keep]
 #   --without-plugin  start the server with no plugin; the script must fail
@@ -108,7 +109,9 @@ call GET /Startup/User >/dev/null
 call POST /Startup/User '{"Name":"admin","Password":"admin-password"}'
 call POST /Startup/Complete
 token="$(call POST /Users/AuthenticateByName '{"Username":"admin","Pw":"admin-password"}' | json "d['AccessToken']")"
-call POST /Users/New '{"Name":"alice","Password":"alice-password"}' >/dev/null
+for user in alice bob carol; do
+  call POST /Users/New "{\"Name\":\"$user\",\"Password\":\"$user-password\"}" >/dev/null
+done
 call POST "/Library/VirtualFolders?name=Movies&collectionType=movies&refreshLibrary=false" '{"LibraryOptions":{"PathInfos":[{"Path":"/media/movies"}]}}'
 call POST "/Library/VirtualFolders?name=Shows&collectionType=tvshows&refreshLibrary=true" '{"LibraryOptions":{"PathInfos":[{"Path":"/media/shows"}]}}'
 
@@ -126,7 +129,6 @@ echo "items: movie $movie, series $series, season $season, episode $episode"
 
 cat >"$work/results/server.json" <<EOF
 {"api": "$api", "plugin_id": "$(sed -n 's/.*"guid": *"\([^"]*\)".*/\1/p' "$meta")", "admin_token": "$token",
- "user": "alice", "password": "alice-password",
  "items": {"Movie": "$movie", "Series": "$series", "Season": "$season", "Episode": "$episode"}}
 EOF
 
@@ -149,24 +151,36 @@ cfg = json.load(open(sys.argv[1], encoding="utf-8"))
 API = cfg["api"]
 ITEMS = cfg["items"]
 LABEL = "Report a problem"
+REASONS = ["Won't play", "Playback error", "Poor quality", "Stutter or jitter", "Audio problem", "Subtitle problem", "Wrong metadata", "Other"]
+NOTE = "Blurry in dark scenes."
 WAIT_MS = 15000
 failures = []
+
+
+def admin(path, body=None):
+    auth = 'MediaBrowser Client="media-reports-smoke", Device="smoke", DeviceId="media-reports-web", Version="1.0.0", Token="%s"' % cfg["admin_token"]
+    headers = {"Authorization": auth}
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode()
+        headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(API + path, data=data, method="POST" if body is not None else "GET", headers=headers)
+    with urllib.request.urlopen(request) as response:
+        text = response.read()
+    return json.loads(text) if text else None
+
+
+def configure(**changes):
+    path = "/Plugins/%s/Configuration" % cfg["plugin_id"]
+    config = admin(path)
+    config.update(changes)
+    admin(path, config)
+    return config
 
 
 def server_id():
     with urllib.request.urlopen(API + "/System/Info/Public") as response:
         return json.load(response)["Id"]
-
-
-def set_reporting(on):
-    auth = 'MediaBrowser Client="media-reports-smoke", Device="smoke", DeviceId="media-reports-web", Version="1.0.0", Token="%s"' % cfg["admin_token"]
-    url = "%s/Plugins/%s/Configuration" % (API, cfg["plugin_id"])
-    with urllib.request.urlopen(urllib.request.Request(url, headers={"Authorization": auth})) as response:
-        config = json.load(response)
-    config["ReportingEnabled"] = on
-    request = urllib.request.Request(url, data=json.dumps(config).encode(), method="POST",
-                                     headers={"Authorization": auth, "Content-Type": "application/json"})
-    urllib.request.urlopen(request).close()
 
 
 def check(ok, what):
@@ -175,13 +189,18 @@ def check(ok, what):
         failures.append(what)
 
 
-def sign_in(page):
+def browser(p):
+    launch = {"channel": os.environ["PLAYWRIGHT_CHANNEL"]} if os.environ.get("PLAYWRIGHT_CHANNEL") else {}
+    return p.chromium.launch(**launch)
+
+
+def sign_in(page, user):
     page.goto(API + "/web/#/login")
     page.wait_for_selector("#txtManualName, button.btnManual", timeout=WAIT_MS)
     if not page.locator("#txtManualName").is_visible():
         page.locator("button.btnManual").first.click()
-    page.fill("#txtManualName", cfg["user"])
-    page.fill("#txtManualPassword", cfg["password"])
+    page.fill("#txtManualName", user)
+    page.fill("#txtManualPassword", user + "-password")
     page.locator("#txtManualPassword").press("Enter")
     page.wait_for_function("() => window.ApiClient && window.ApiClient.getCurrentUserId && window.ApiClient.getCurrentUserId()", timeout=WAIT_MS)
     # Signing in ends on Home; navigating before it lands would be overridden.
@@ -191,6 +210,7 @@ def sign_in(page):
 
 DETAIL_BUTTON = ".page:not(.hide) .mainDetailButtons .mediaReportsButton"
 PLAYER_BUTTON = ".osdControls .buttons .mediaReportsButton"
+DIALOG = ".mediaReportsDialog"
 
 # Where our button sits and what it looks like, read in the page.
 DESCRIBE = """sel => {
@@ -202,6 +222,39 @@ DESCRIBE = """sel => {
   }));
 }"""
 
+# The open dialog: its box, layout, reasons, buttons and messages.
+DIALOG_STATE = """() => {
+  const d = document.querySelector('.mediaReportsDialog');
+  if (!d || d.offsetParent === null && getComputedStyle(d).position !== 'fixed') return null;
+  const r = d.getBoundingClientRect();
+  const chips = [...d.querySelectorAll('.mediaReportsReason')];
+  const send = d.querySelector('.mediaReportsSend');
+  const text = s => { const e = d.querySelector(s); return e && e.offsetParent !== null ? e.textContent.trim() : null; };
+  return {
+    cls: d.className, x: r.left, y: r.top, w: r.width, h: r.height, vw: innerWidth, vh: innerHeight,
+    role: d.getAttribute('role'), modal: d.getAttribute('aria-modal'), label: d.getAttribute('aria-label'),
+    heading: text('.mediaReportsHeading'), name: text('.mediaReportsTitle'),
+    reasons: chips.map(c => c.textContent.trim()),
+    pressed: chips.filter(c => c.getAttribute('aria-pressed') === 'true').map(c => c.textContent.trim()),
+    disabled: chips.filter(c => c.disabled).map(c => c.textContent.trim()),
+    note: d.querySelector('.mediaReportsNote') ? d.querySelector('.mediaReportsNote').value : null,
+    noteShown: !!d.querySelector('.mediaReportsNote') && d.querySelector('.mediaReportsNote').offsetParent !== null,
+    send: send ? send.textContent.trim() : null, sendDisabled: send ? send.disabled : null,
+    playback: text('.mediaReportsPlayback'), error: text('.mediaReportsError'), info: text('.mediaReportsInfo'),
+    sent: text('.mediaReportsSent'), focusInside: d.contains(document.activeElement),
+    focus: document.activeElement ? (document.activeElement.textContent || '').trim() : ''
+  };
+}"""
+
+
+def dialog(page):
+    return page.evaluate(DIALOG_STATE)
+
+
+def wait_dialog(page, open_=True):
+    page.wait_for_function("open => (document.querySelector('.mediaReportsDialog') !== null) === open", arg=open_, timeout=WAIT_MS)
+    page.wait_for_timeout(300)
+
 
 def placed(page, selector, item_id, where):
     try:
@@ -210,26 +263,208 @@ def placed(page, selector, item_id, where):
                                arg=[DESCRIBE, selector, item_id], timeout=WAIT_MS)
     except Exception:  # noqa: BLE001 - a timeout is the finding
         check(False, where + ": the Report button appears")
-        return
+        return False
     found = page.evaluate(DESCRIBE, selector)
     check(len(found) == 1, where + ": exactly one Report button (%d)" % len(found))
-    if found:
-        b = found[0]
-        check("btnUserRating" in b["after"], where + ": it sits right after the favourite button")
-        check(b["title"] == LABEL and b["aria"] == LABEL, where + ': it is labelled "%s"' % LABEL)
-        check(b["flag"], where + ": it shows the flag icon")
-        check(b["id"] == item_id, where + ": it is for this title")
+    b = found[0]
+    check("btnUserRating" in b["after"], where + ": it sits right after the favourite button")
+    check(b["title"] == LABEL and b["aria"] == LABEL, where + ': it is labelled "%s"' % LABEL)
+    check(b["flag"], where + ": it shows the flag icon")
+    check(b["id"] == item_id, where + ": it is for this title")
+    return True
 
 
-def run(p, layout, context_args):
-    launch = {"channel": os.environ["PLAYWRIGHT_CHANNEL"]} if os.environ.get("PLAYWRIGHT_CHANNEL") else {}
-    browser = p.chromium.launch(**launch)
-    context = browser.new_context(**context_args)
-    page = context.new_page()
+def open_dialog(page, selector, layout, where):
+    if layout == "tv":
+        page.locator(selector).first.focus()
+        page.keyboard.press("Enter")
+    else:
+        page.locator(selector).first.click()
+    try:
+        wait_dialog(page)
+        return True
+    except Exception:  # noqa: BLE001 - a timeout is the finding
+        check(False, where + ": choosing the Report button opens the dialog")
+        return False
+
+
+def pick(page, reason, layout):
+    if layout != "tv":
+        page.locator(DIALOG + " .mediaReportsReason", has_text=reason).click()
+        return
+    for _ in range(12):
+        if page.evaluate("() => (document.activeElement.textContent || '').trim()") == reason:
+            break
+        page.keyboard.press("ArrowRight")
+    page.keyboard.press("Enter")
+
+
+def send(page, layout):
+    if layout != "tv":
+        page.locator(DIALOG + " .mediaReportsSend").click()
+        return
+    for _ in range(12):
+        focused = page.evaluate("() => document.activeElement.className")
+        if "mediaReportsSend" in focused:
+            break
+        # Down from a reason on the right can land on Cancel; Send is to its left.
+        page.keyboard.press("ArrowLeft" if "mediaReportsCancel" in focused else "ArrowDown")
+    page.keyboard.press("Enter")
+
+
+def check_layout(state, layout, where):
+    if layout == "desktop":
+        check("mr-desktop" in state["cls"] and abs(state["w"] - 640) <= 2 and abs(state["x"] - (state["vw"] - state["w"]) / 2) <= 2,
+              where + ": a centred 640 px panel (%dx%d at %d)" % (state["w"], state["h"], state["x"]))
+    elif layout == "phone":
+        check("mr-phone" in state["cls"] and state["w"] == state["vw"] and state["h"] == state["vh"], where + ": full screen (%dx%d)" % (state["w"], state["h"]))
+    elif layout == "tv":
+        check("mr-tv" in state["cls"] and state["w"] == state["vw"] and state["h"] == state["vh"], where + ": full screen (%dx%d)" % (state["w"], state["h"]))
+    else:
+        check("mr-panel" in state["cls"] and abs(state["x"] + state["w"] - state["vw"]) <= 1 and state["h"] == state["vh"] and state["w"] <= 480,
+              where + ": a side panel at the right (%dx%d)" % (state["w"], state["h"]))
+    check(state["role"] == "dialog" and state["modal"] == "true", where + ": it is a modal dialog to assistive tech")
+
+
+def report_from_page(page, layout):
+    """The page dialog: layout, reasons, focus, couldn't send, sending, sent, already reported, note too long, BACK."""
+    where = layout + ", dialog on the movie page"
+    if not open_dialog(page, DETAIL_BUTTON, layout, where):
+        return
+    s = dialog(page)
+    check_layout(s, layout, where)
+    check(s["heading"] == LABEL and s["name"] and "Test Movie" in s["name"], where + ": it names the title")
+    check(s["reasons"] == REASONS, where + ": the eight reasons in order (%s)" % s["reasons"])
+    check(s["sendDisabled"] is True and s["send"] == "Send report", where + ": Send is disabled until a reason is picked")
+    check(s["focusInside"], where + ": focus moves into the dialog")
+    check(s["playback"] is None, where + ": no playback is mentioned before this user played it")
+    check(s["noteShown"] == (layout != "tv"), where + (": no note field on TV" if layout == "tv" else ": a note field"))
+
+    if layout != "tv":
+        for _ in range(25):
+            page.keyboard.press("Tab")
+        check(dialog(page)["focusInside"], where + ": Tab keeps focus inside the dialog")
+    page.keyboard.press("Escape")
+    wait_dialog(page, False)
+    check("mediaReportsButton" in page.evaluate("() => document.activeElement.className"), where + ": closing returns focus to the Report button")
+
+    open_dialog(page, DETAIL_BUTTON, layout, where)
+    pick(page, "Stutter or jitter", layout)
+    s = dialog(page)
+    check(s["pressed"] == ["Stutter or jitter"] and s["sendDisabled"] is False, where + ": picking a reason enables Send")
+    if layout != "tv":
+        page.fill(DIALOG + " .mediaReportsNote", NOTE)
+
+    # Couldn't send: the report request fails in the browser.
+    page.route("**/MediaReports/Report", lambda route: route.abort())
+    send(page, layout)
+    page.wait_for_function("() => { const e = document.querySelector('.mediaReportsError'); return !!e && e.style.display !== 'none' && !!e.textContent; }", timeout=WAIT_MS)
+    s = dialog(page)
+    check(s["error"] and "wasn't sent" in s["error"], where + ": could not send shows an alert")
+    check(s["pressed"] == ["Stutter or jitter"] and (layout == "tv" or s["note"] == NOTE), where + ": the reason and note are kept")
+    check(s["send"] == "Try again", where + ': Send becomes "Try again"')
+    page.unroute("**/MediaReports/Report")
+
+    # Sending, then sent: the Send button's changes are recorded in the page.
+    page.evaluate("""() => { const b = document.querySelector('.mediaReportsSend'); window.__sendStates = [];
+        new MutationObserver(() => window.__sendStates.push([b.textContent, b.disabled]))
+          .observe(b, { childList: true, characterData: true, subtree: true, attributes: true }); }""")
+    send(page, layout)
+    page.wait_for_function("() => !!document.querySelector('.mediaReportsSent')", timeout=WAIT_MS)
+    states = page.evaluate("() => window.__sendStates")
+    check(any(t.startswith("Sending") and disabled for t, disabled in states), where + ': Send reads "Sending" and is disabled while the server answers')
+    s = dialog(page)
+    check(s["sent"] and s["sent"].startswith("Report sent") and "My Reports" in s["sent"], where + ': "Report sent", pointing at My Reports')
+    page.keyboard.press("Enter") if layout == "tv" else page.locator(DIALOG + " .mediaReportsDone").click()
+    wait_dialog(page, False)
+
+    # Already reported: the earlier reason is named and blocked; the others stay open.
+    open_dialog(page, DETAIL_BUTTON, layout, where)
+    s = dialog(page)
+    check(s["info"] and "Stutter or jitter" in s["info"], where + ": it says this title was already reported for Stutter or jitter")
+    check(s["disabled"] == ["Stutter or jitter"], where + ": that reason can't be picked again, the others can (%s)" % s["disabled"])
+
+    if layout != "tv":
+        pick(page, "Audio problem", layout)
+        page.fill(DIALOG + " .mediaReportsNote", "x" * 1001)
+        send(page, layout)
+        page.wait_for_function("() => { const e = document.querySelector('.mediaReportsError'); return !!e && e.style.display !== 'none' && !!e.textContent; }", timeout=WAIT_MS)
+        check("too long" in (dialog(page)["error"] or ""), where + ": a note over 1,000 characters is refused as too long")
+        page.keyboard.press("Escape")
+    else:
+        page.keyboard.press("Backspace")
+    wait_dialog(page, False)
+    check(True, where + (": BACK closes the dialog" if layout == "tv" else ": ESC closes the dialog"))
+
+
+def report_from(page, kind, reason, layout, sid):
+    page.goto("%s/web/#/details?id=%s&serverId=%s" % (API, ITEMS[kind], sid))
+    if not placed(page, DETAIL_BUTTON, ITEMS[kind], "%s, %s page" % (layout, kind.lower())):
+        return
+    where = "%s, dialog on the %s page" % (layout, kind.lower())
+    if not open_dialog(page, DETAIL_BUTTON, layout, where):
+        return
+    pick(page, reason, layout)
+    send(page, layout)
+    page.wait_for_function("() => !!document.querySelector('.mediaReportsSent')", timeout=WAIT_MS)
+    check(True, where + ": the report is sent")
+    page.keyboard.press("Escape")
+    wait_dialog(page, False)
+
+
+def report_from_player(page, layout, sid):
+    page.goto("%s/web/#/details?id=%s&serverId=%s" % (API, ITEMS["Movie"], sid))
+    placed(page, DETAIL_BUTTON, ITEMS["Movie"], layout + ", movie page before playing")
+    page.locator(".page:not(.hide) .mainDetailButtons .btnPlay").first.click()
+    page.wait_for_selector(".osdControls", state="attached", timeout=WAIT_MS)
+    page.wait_for_function("() => { const v = document.querySelector('video'); return v && !v.paused && v.currentTime > 1; }", timeout=WAIT_MS * 2)
+    for _ in range(4):
+        page.mouse.move(300, 300)
+        page.mouse.move(500, 400)
+        if layout == "tv":
+            page.keyboard.press("ArrowUp")
+        page.wait_for_timeout(400)
+    if not placed(page, PLAYER_BUTTON, ITEMS["Movie"], layout + ", player"):
+        return
+    where = layout + ", dialog in the player"
+    if not open_dialog(page, PLAYER_BUTTON, "desktop" if layout != "tv" else "tv", where):
+        return
+    s = dialog(page)
+    check_layout(s, "panel", where)
+    check(s["playback"] and "playing right now" in s["playback"], where + ": it says the playback right now is attached")
+    pick(page, "Poor quality", layout)
+    if layout != "tv":
+        page.locator(DIALOG + " .mediaReportsNote").type("Looks soft.")
+    send(page, layout)
+    page.wait_for_function("() => !!document.querySelector('.mediaReportsSent')", timeout=WAIT_MS)
+    check(not page.evaluate("() => document.querySelector('video').paused"), where + ": playback is not paused")
+    try:
+        wait_dialog(page, False)
+        page.wait_for_timeout(0)
+        closed = True
+    except Exception:  # noqa: BLE001
+        closed = False
+    check(closed, where + ": the panel closes by itself after it is sent")
+    check(not page.evaluate("() => document.querySelector('video').paused"), where + ": playback carries on after the panel closes")
+    page.keyboard.press("Escape")
+    page.go_back()
+    page.wait_for_timeout(1500)
+
+    page.goto("%s/web/#/details?id=%s&serverId=%s" % (API, ITEMS["Movie"], sid))
+    placed(page, DETAIL_BUTTON, ITEMS["Movie"], layout + ", movie page after playing")
+    open_dialog(page, DETAIL_BUTTON, layout, layout + ", dialog after playing")
+    s = dialog(page) or {}
+    check((s.get("playback") or "").startswith("How you last played it, on "), layout + ", dialog after playing: it names the device and day of the last playback")
+    page.keyboard.press("Escape")
+
+
+def run(p, layout, user, context_args):
+    b = browser(p)
+    page = b.new_context(**context_args).new_page()
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)) if "reporter.js" in (e.stack or "") else None)
     page.on("console", lambda m: errors.append(m.text) if "[Media Reports]" in m.text else None)
-    sign_in(page)
+    sign_in(page, user)
     if layout == "tv":
         page.evaluate("localStorage.setItem('layout', 'tv')")
         page.reload()
@@ -241,60 +476,74 @@ def run(p, layout, context_args):
     for kind in ("Movie", "Episode", "Season", "Series"):
         page.goto(details(ITEMS[kind]))
         placed(page, DETAIL_BUTTON, ITEMS[kind], "%s, %s page" % (layout, kind.lower()))
-
-    # Moving between pages adds the button to each page once.
     for kind in ("Series", "Movie", "Series", "Movie"):
         page.goto(details(ITEMS[kind]))
-    placed(page, DETAIL_BUTTON, ITEMS["Movie"], layout + ", movie page after moving between pages")
+    if placed(page, DETAIL_BUTTON, ITEMS["Movie"], layout + ", movie page after moving between pages"):
+        report_from_page(page, layout)
 
-    page.evaluate("""() => { window.__reported = null;
-        document.addEventListener('mediareports:report', e => { window.__reported = e.detail; }); }""")
-    if page.locator(DETAIL_BUTTON).count():
-        page.locator(DETAIL_BUTTON).first.click()
-    reported = page.evaluate("() => window.__reported")
-    check(bool(reported) and reported.get("itemId") == ITEMS["Movie"] and reported.get("fromPlayer") is False,
-          layout + ": choosing the button asks to report this title")
-
-    page.locator(".page:not(.hide) .mainDetailButtons .btnPlay").first.click()
-    page.wait_for_selector(".osdControls", state="attached", timeout=WAIT_MS)
-    for _ in range(4):
-        page.mouse.move(300, 300)
-        page.mouse.move(500, 400)
-        page.keyboard.press("ArrowUp") if layout == "tv" else None
-        page.wait_for_timeout(400)
-    placed(page, PLAYER_BUTTON, ITEMS["Movie"], layout + ", player")
-    page.keyboard.press("Escape")
+    report_from(page, "Episode", "Subtitle problem", layout, sid)
+    report_from(page, "Series", "Other", layout, sid)
+    report_from_player(page, layout, sid)
 
     check(not errors, layout + ": no errors from the Report button script" + (": " + "; ".join(errors) if errors else ""))
-    browser.close()
+    b.close()
 
 
 PHONE = {"viewport": {"width": 390, "height": 844}, "is_mobile": True, "has_touch": True, "device_scale_factor": 2,
          "user_agent": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36"}
 
 with sync_playwright() as p:
-    run(p, "desktop", {"viewport": {"width": 1440, "height": 900}})
-    run(p, "phone", PHONE)
-    run(p, "tv", {"viewport": {"width": 1280, "height": 720}})
+    run(p, "desktop", "alice", {"viewport": {"width": 1440, "height": 900}})
+    run(p, "phone", "bob", PHONE)
+    run(p, "tv", "carol", {"viewport": {"width": 1280, "height": 720}})
 
-    # Switched off: the page carries no script and shows no button, without a restart.
-    set_reporting(False)
+    # What the dialogs stored.
+    export = admin("/MediaReports/Admin/Export")
+    users = {"alice": "desktop", "bob": "phone", "carol": "tv"}
+    for name, layout in users.items():
+        mine = [r for r in export["reports"] if r["reporterName"] == name]
+        by = lambda reason: [r for r in mine if r["reasonCode"] == reason]
+        movie = by("stutter")
+        check(len(movie) == 1 and movie[0]["itemId"].replace("-", "") == ITEMS["Movie"] and (layout == "tv" or movie[0]["note"] == NOTE),
+              layout + ": the movie report is stored with its reason" + ("" if layout == "tv" else " and note"))
+        check(not by("audio"), layout + ": the refused report was not stored")
+        episode = by("subtitles")
+        check(len(episode) == 1 and episode[0]["itemType"] == "Episode" and episode[0]["itemId"].replace("-", "") == ITEMS["Episode"],
+              layout + ": the episode report names the episode")
+        series = by("other")
+        check(len(series) == 1 and series[0]["itemType"] == "Series" and series[0]["snapshot"] is None,
+              layout + ": the series report names the series and has no playback")
+        player = by("poor-quality")
+        check(len(player) == 1 and player[0]["snapshot"] and player[0]["snapshot"]["state"] == "Playing",
+              layout + ": the player report carries the live playback")
+
+    # A retired reason isn't offered; switched off, the page carries no script and no button.
+    original = admin("/Plugins/%s/Configuration" % cfg["plugin_id"])
     try:
-        launch = {"channel": os.environ["PLAYWRIGHT_CHANNEL"]} if os.environ.get("PLAYWRIGHT_CHANNEL") else {}
-        browser = p.chromium.launch(**launch)
-        page = browser.new_context(viewport={"width": 1440, "height": 900}).new_page()
-        sign_in(page)
+        configure(Reasons=[dict(r, Retired=(r["Code"] == "metadata")) for r in original["Reasons"]])
+        b = browser(p)
+        page = b.new_context(viewport={"width": 1440, "height": 900}).new_page()
+        sign_in(page, "alice")
+        page.goto("%s/web/#/details?id=%s&serverId=%s" % (API, ITEMS["Season"], server_id()))
+        if placed(page, DETAIL_BUTTON, ITEMS["Season"], "retired reason, season page") and open_dialog(page, DETAIL_BUTTON, "desktop", "retired reason"):
+            check("Wrong metadata" not in dialog(page)["reasons"], "retired reason: \"Wrong metadata\" is not offered")
+        b.close()
+
+        configure(ReportingEnabled=False)
+        b = browser(p)
+        page = b.new_context(viewport={"width": 1440, "height": 900}).new_page()
+        sign_in(page, "alice")
         page.goto("%s/web/#/details?id=%s&serverId=%s" % (API, ITEMS["Movie"], server_id()))
         page.wait_for_selector(".page:not(.hide) .mainDetailButtons .btnUserRating", timeout=WAIT_MS)
         page.wait_for_timeout(2000)
         check(page.locator('script[src*="reporter.js"]').count() == 0, "reporting off: the page carries no reporter.js")
         check(page.locator(".mediaReportsButton").count() == 0, "reporting off: no Report button")
-        browser.close()
+        b.close()
     finally:
-        set_reporting(True)
+        admin("/Plugins/%s/Configuration" % cfg["plugin_id"], original)
 
 if failures:
     print("FAIL: %d check(s) failed" % len(failures))
     sys.exit(1)
-print("PASS: the Report button appears where it should in Jellyfin Web")
+print("PASS: the Report button and dialog work in Jellyfin Web")
 PY

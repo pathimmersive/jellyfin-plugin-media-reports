@@ -14,6 +14,8 @@
     <!-- The server provides these at runtime; never ship them in the plugin folder. -->
     <PackageReference Include="Jellyfin.Controller" Version="12.0.*" ExcludeAssets="runtime" />
     <PackageReference Include="Jellyfin.Model" Version="12.0.*" ExcludeAssets="runtime" />
+    <!-- The server loads its own SQLite; the plugin ships neither the library nor native binaries. -->
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.11" ExcludeAssets="runtime" />
   </ItemGroup>
 
   <ItemGroup>

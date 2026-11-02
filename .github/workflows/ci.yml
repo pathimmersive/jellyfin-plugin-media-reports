@@ -39,3 +39,5 @@ jobs:
       # Plays a generated movie on Jellyfin 12 with a forced transcode and checks the
       # playbacks the plugin serves during playback and after the stop.
       - run: bash scripts/smoke-playback.sh
+      # Migrates, anonymises, purges, copies and exports report storage on Jellyfin 12.
+      - run: bash scripts/smoke-storage.sh

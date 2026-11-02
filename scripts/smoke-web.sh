@@ -326,6 +326,39 @@ def check_layout(state, layout, where):
     check(state["role"] == "dialog" and state["modal"] == "true", where + ": it is a modal dialog to assistive tech")
 
 
+REMOTE_BUTTONS_JS = """() => {
+  const d = document.querySelector('.mediaReportsDialog');
+  const send = d.querySelector('.mediaReportsSend'), cancel = d.querySelector('.mediaReportsCancel');
+  const look = b => { const c = getComputedStyle(b); return c.backgroundColor + ' ' + c.color; };
+  const rs = send.getBoundingClientRect(), rc = cancel.getBoundingClientRect();
+  cancel.focus();
+  const sendIdle = look(send), cancelFocused = look(cancel);
+  send.focus();
+  const sendFocused = look(send), cancelIdle = look(cancel);
+  return {stacked: rc.top >= rs.bottom && Math.abs(rc.left - rs.left) < 1 && Math.abs(rc.width - rs.width) < 1,
+          sendIdle, cancelFocused, sendFocused, cancelIdle};
+}"""
+
+
+def remote_buttons(page, where):
+    """With a remote, Send and Cancel are stacked and only the focused one is highlighted."""
+    r = page.evaluate(REMOTE_BUTTONS_JS)
+    check(r["stacked"], where + ": Send and Cancel are stacked")
+    check(r["sendIdle"] == r["cancelIdle"] and r["sendFocused"] == r["cancelFocused"] and r["sendIdle"] != r["sendFocused"],
+          where + ": only the focused one of Send and Cancel is highlighted (%s)" % r)
+
+
+STYLE_JS = """sel => { const b = document.querySelector(sel); const c = getComputedStyle(b);
+  return [c.color, c.backgroundColor, c.transform].join(' '); }"""
+
+
+def focused_style(page, selector):
+    """The button's look once focused and its transition has settled."""
+    page.evaluate("sel => document.querySelector(sel).focus()", selector)
+    page.wait_for_timeout(600)
+    return page.evaluate(STYLE_JS, selector)
+
+
 def report_from_page(page, layout):
     """The page dialog: layout, reasons, focus, couldn't send, sending, sent, already reported, note too long, BACK."""
     where = layout + ", dialog on the movie page"
@@ -354,6 +387,8 @@ def report_from_page(page, layout):
     check(s["pressed"] == ["Stutter or jitter"] and s["sendDisabled"] is False, where + ": picking a reason enables Send")
     if layout != "tv":
         page.fill(DIALOG + " .mediaReportsNote", NOTE)
+    else:
+        remote_buttons(page, where)
 
     # Couldn't send: the report request fails in the browser.
     page.route("**/MediaReports/Report", lambda route: route.abort())
@@ -426,6 +461,10 @@ def report_from_player(page, layout, sid):
         page.wait_for_timeout(400)
     if not placed(page, PLAYER_BUTTON, ITEMS["Movie"], layout + ", player"):
         return
+    if layout == "tv":
+        f = {"idle": page.evaluate(STYLE_JS, PLAYER_BUTTON), "fav": focused_style(page, ".osdControls .buttons .btnUserRating"),
+             "ours": focused_style(page, PLAYER_BUTTON)}
+        check(f["ours"] == f["fav"] and f["ours"] != f["idle"], "tv, player: the Report button is highlighted on focus like the favourite button (%s)" % f)
     where = layout + ", dialog in the player"
     if not open_dialog(page, PLAYER_BUTTON, "desktop" if layout != "tv" else "tv", where):
         return

@@ -89,7 +89,7 @@
         var icon = el('span');
         icon.setAttribute('aria-hidden', 'true');
         if (inPlayer) {
-            button.className = 'autoSize paper-icon-button-light ' + BUTTON_CLASS;
+            button.className = 'autoSize paper-icon-button-light ' + BUTTON_CLASS + (isTv() ? ' show-focus' : '');
             icon.className = 'xlargePaperIconButton material-icons flag';
             button.appendChild(icon);
         } else {
@@ -195,6 +195,11 @@
         + '.mediaReportsSend,.mediaReportsDone{background:#00a4dc;color:rgba(0,0,0,.87);}'
         + '.mediaReportsSend:disabled{background:rgba(255,255,255,.12);color:rgba(255,255,255,.5);cursor:default;}'
         + '.mediaReportsCancel{background:rgba(255,255,255,.12);color:inherit;}'
+        // With a remote only the focused button is highlighted, and the buttons are stacked.
+        + '.mr-remote .mediaReportsActions{flex-direction:column;}'
+        + '.mr-remote .mediaReportsSend,.mr-remote .mediaReportsDone{flex:none;min-height:56px;background:rgba(255,255,255,.12);color:inherit;}'
+        + '.mr-remote .mediaReportsCancel{flex:none;min-height:56px;}'
+        + '.mr-remote .mediaReportsSend:disabled{background:transparent;color:rgba(255,255,255,.5);}'
         + '.mediaReportsSent{margin-top:24px;}'
         + '.mediaReportsSent strong{display:block;font-size:1.2em;margin-bottom:8px;}'
         + '.mediaReportsDialog.mr-remote *:focus{outline:none;background:#00a4dc;border-color:#00a4dc;color:rgba(0,0,0,.87);}'

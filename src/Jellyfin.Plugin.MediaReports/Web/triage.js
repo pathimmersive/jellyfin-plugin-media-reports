@@ -85,6 +85,7 @@ const STYLES = `
 .mrActions>*{margin:4px}
 .mrBack{display:inline-flex;align-items:center;font-size:14px;text-decoration:none;align-self:flex-start}
 .mediaReportsIssue>*+*{margin-top:24px}
+.mediaReportsIssue>.mrIssueHead{margin-top:6px}
 .mrIssueHead{display:flex;flex-wrap:wrap;align-items:flex-start;margin:-10px}
 .mrIssueHead>*{margin:10px}
 .mrIssueHead .mrPoster{width:96px;height:144px;border-radius:4px}
@@ -97,6 +98,7 @@ const STYLES = `
 .mrSection{display:flex;flex-direction:column;min-width:0}
 .mrSection>*+*{margin-top:12px}
 .mrTriage{display:grid;grid-template-columns:minmax(220px,1fr) 2fr;grid-gap:20px;align-items:start}
+.mrCard.mrTriage>*+*{margin-top:0}
 .mrField{display:flex;flex-direction:column}
 .mrField>*+*{margin-top:6px}
 .mrField select{height:44px;font-size:15px;width:100%}

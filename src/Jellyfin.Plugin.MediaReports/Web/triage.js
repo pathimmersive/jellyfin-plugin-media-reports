@@ -1,0 +1,787 @@
+// Media Reports page in the Dashboard: the Reports tab and one issue.
+// The tab, the issue and the list's view, grouping, filters, sort and page live in the
+// page's URL, so Back returns to the list as it was.
+
+const PAGE = 'mediareports';
+const API = 'MediaReports/Admin/';
+
+const STATUSES = [
+    { code: 'New', label: 'New', bg: 'rgba(0,164,220,.18)', fg: '#4fc3ec' },
+    { code: 'Investigating', label: 'Investigating', bg: 'rgba(242,176,30,.18)', fg: '#f5c451' },
+    { code: 'ReplacedVerify', label: 'Replaced – verify', bg: 'rgba(179,136,255,.18)', fg: '#c7a8ff' },
+    { code: 'Fixed', label: 'Fixed', bg: 'rgba(102,187,106,.18)', fg: '#8fd193' },
+    { code: 'WontFix', label: "Won't fix", bg: 'rgba(255,255,255,.1)', fg: 'rgba(255,255,255,.75)' },
+    { code: 'Duplicate', label: 'Duplicate', bg: 'rgba(255,255,255,.1)', fg: 'rgba(255,255,255,.75)' },
+    { code: 'CantReproduce', label: "Can't reproduce", bg: 'rgba(255,255,255,.1)', fg: 'rgba(255,255,255,.75)' }
+];
+const MIXED = { code: 'Mixed', label: 'Mixed', bg: 'rgba(255,255,255,.1)', fg: 'rgba(255,255,255,.75)' };
+
+const LIST_KEYS = ['view', 'groupBy', 'reason', 'client', 'q', 'sort', 'page'];
+const DEFAULTS = { view: 'open', groupBy: 'title', sort: 'last', page: '1' };
+
+const STYLES = `
+.mediaReportsTriage{--mr-text:rgba(255,255,255,.87);--mr-muted:rgba(255,255,255,.7);--mr-faint:rgba(255,255,255,.6);--mr-card:#181818;--mr-accent:#00a4dc;
+  color:var(--mr-text);font-size:15px;display:flex;flex-direction:column;padding-bottom:48px}
+.mediaReportsTriage>*+*{margin-top:20px}
+.mediaReportsTriage a{color:var(--mr-accent)}
+.mediaReportsTriage a:hover{color:#4fc3ec}
+.mrHead{display:flex;flex-wrap:wrap;align-items:baseline}
+.mrHead h1{margin:0 24px 0 0;font-size:30px;font-weight:400;color:#fff}
+.mrMuted{color:var(--mr-muted)}
+.mrFaint{color:var(--mr-faint);font-size:13px}
+.mrTabs{display:flex;flex-wrap:wrap;border-bottom:1px solid rgba(255,255,255,.12)}
+.mrTab{height:48px;display:inline-flex;align-items:center;padding:0 16px;color:#fff !important;text-decoration:none;font-weight:600;font-size:14px;border-bottom:2px solid var(--mr-accent)}
+.mrTab .mrCount{margin-left:8px;color:var(--mr-muted);font-weight:400}
+.mrControls{display:flex;flex-wrap:wrap;align-items:center;margin:-6px -10px}
+.mrControls>*{margin:6px 10px}
+.mrSegs{display:flex}
+.mrSeg{height:36px;padding:0 14px;border:1px solid rgba(255,255,255,.24);background:transparent;color:var(--mr-text);font:inherit;font-size:14px;cursor:pointer;margin-left:-1px}
+.mrSeg:first-child{border-radius:4px 0 0 4px;margin-left:0}
+.mrSeg:last-child{border-radius:0 4px 4px 0}
+.mrSeg[aria-pressed=true]{background:rgba(0,164,220,.2);border-color:var(--mr-accent);color:#fff;font-weight:600;position:relative}
+.mrLabel{display:flex;align-items:center;font-size:14px;color:var(--mr-muted)}
+.mrLabel select{margin-left:8px}
+.mrSelect{height:36px;background:#2a2a2a;color:#fff;border:1px solid rgba(255,255,255,.18);border-radius:4px;font:inherit;font-size:14px;padding:0 8px}
+.mrSearch{flex:1 1 200px;display:flex;align-items:center;height:36px;padding:0 10px;background:rgba(255,255,255,.09);border-radius:4px}
+.mrSearch input{flex:1;min-width:0;background:none;border:0;color:#fff;font:inherit;font-size:14px;outline:none;margin-left:8px}
+.mrSearch:focus-within{outline:2px solid var(--mr-accent)}
+.mrIcon{font-family:'Material Icons';font-weight:normal;font-style:normal;font-size:20px;line-height:1;display:inline-block;-webkit-font-smoothing:antialiased;vertical-align:middle}
+.mrTableBox{overflow-x:auto;background:var(--mr-card);border-radius:8px}
+.mrTable{width:100%;border-collapse:collapse;min-width:860px}
+.mrTable th{font-size:12px;font-weight:600;color:var(--mr-faint);text-align:left;padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.12);white-space:nowrap}
+.mrTable th button{background:none;border:0;padding:0;font:inherit;color:inherit;cursor:pointer}
+.mrTable th button:hover,.mrTable th[aria-sort] button{color:#fff}
+.mrTable td{padding:12px;border-bottom:1px solid rgba(255,255,255,.07);vertical-align:middle;font-size:14px}
+.mrTable tbody tr:hover{background:rgba(255,255,255,.04)}
+.mrTable tr.mrChild td:first-child{padding-left:44px}
+.mrTitleCell{display:flex;align-items:center}
+.mrTitleCell>*+*{margin-left:10px}
+.mrDot{display:block;width:8px;height:8px;border-radius:4px;background:var(--mr-accent)}
+.mrDotSlot{width:8px;flex-shrink:0}
+.mrPoster{width:32px;height:46px;border-radius:3px;background:#2b3a44 center/cover no-repeat;flex-shrink:0}
+.mrTitleText{display:flex;flex-direction:column}
+.mrTitleLink{color:#fff !important;text-decoration:none;font-weight:600;background:none;border:0;padding:0;font:inherit;font-weight:600;text-align:left;cursor:pointer}
+.mrTitleLink:hover{color:#4fc3ec !important;text-decoration:underline}
+.mrLine{color:var(--mr-faint);font-size:12px}
+.mrPill{display:inline-flex;align-items:center;height:24px;padding:0 10px;border-radius:12px;font-size:12px;font-weight:600;white-space:nowrap}
+.mrPaging{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap}
+.mrPaging>*+*{margin-left:12px}
+.mrBtn{height:36px;border-radius:4px;border:0;font:inherit;font-size:14px;font-weight:600;cursor:pointer;padding:0 14px;display:inline-flex;align-items:center;text-decoration:none;background:#424242;color:#fff !important}
+.mrBtn:hover{background:#505050}
+.mrBtn:disabled{opacity:.4;cursor:default}
+.mrBtn .mrIcon{margin-right:8px;font-size:18px}
+.mrPrimary{background:var(--mr-accent);color:rgba(0,0,0,.87) !important}
+.mrPrimary:hover{background:#4fc3ec}
+.mrPanel{background:var(--mr-card);border-radius:8px;padding:32px}
+.mrPanel h2{margin:0 0 12px;font-size:24px;font-weight:400;color:#fff}
+.mrPanel p{margin:0 0 14px;color:var(--mr-muted);line-height:1.6}
+.mrAlert{display:flex;align-items:flex-start}
+.mrAlert>.mrIcon{color:#ffb4ab;margin-right:16px;font-size:24px}
+.mrAlert h2{font-size:18px;font-weight:600}
+.mrEmpty{text-align:center}
+.mrSkeleton{display:block;background:#242424;border-radius:4px;height:14px}
+.mrActions{display:flex;flex-wrap:wrap;margin:-4px}
+.mrActions>*{margin:4px}
+.mrBack{display:inline-flex;align-items:center;font-size:14px;text-decoration:none;align-self:flex-start}
+.mrIssueHead{display:flex;flex-wrap:wrap;align-items:flex-start;margin:-10px}
+.mrIssueHead>*{margin:10px}
+.mrIssueHead .mrPoster{width:96px;height:144px;border-radius:4px}
+.mrIssueTitle{flex:1 1 360px;min-width:0;display:flex;flex-direction:column}
+.mrIssueTitle>*+*{margin-top:10px}
+.mrIssueTitle h1{margin:0;font-size:30px;font-weight:400;color:#fff}
+.mrIssueTitle p{margin:0}
+.mrStatusBox{flex:0 1 280px;display:flex;flex-direction:column}
+.mrStatusBox>*+*{margin-top:6px}
+.mrStatusBox select{height:44px;font-size:15px}
+.mrOk{color:#8fd193;font-size:13px}
+.mrBad{color:#ffb4ab;font-size:13px}
+.mrColumns{display:flex;flex-wrap:wrap;align-items:flex-start;margin:-10px}
+.mrColumns>*{margin:10px;min-width:0}
+.mrReports{flex:999 1 520px;display:flex;flex-direction:column}
+.mrReports>*+*{margin-top:12px}
+.mrAside{flex:1 1 340px;display:flex;flex-direction:column}
+.mrAside>*+*{margin-top:20px}
+.mrCard{background:var(--mr-card);border-radius:8px;padding:20px}
+.mrCard>*+*{margin-top:12px}
+.mrH3{margin:0;font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mr-muted)}
+.mrSpread{display:flex;flex-wrap:wrap;justify-content:space-between}
+.mrTags{display:flex;flex-wrap:wrap;margin:-3px}
+.mrTag{display:inline-flex;align-items:center;height:24px;padding:0 8px;border-radius:4px;background:#2a2a2a;font-size:12px;margin:3px}
+.mrLinkBtn{align-self:flex-start;background:none;border:0;color:var(--mr-accent);font:inherit;font-size:14px;font-weight:600;cursor:pointer;padding:6px 0;display:inline-flex;align-items:center}
+.mrDl{margin:0;display:grid;grid-template-columns:140px minmax(0,1fr);grid-gap:8px 16px;font-size:14px}
+.mrDl dt{color:var(--mr-faint)}
+.mrDl dd{margin:0;overflow-wrap:anywhere}
+.mrDetails{padding:12px;background:#141414;border-radius:4px}
+.mrMono{font-family:monospace;font-size:13px}
+.mrHistory{list-style:none;margin:0;padding:0;font-size:14px}
+.mrHistory li{display:flex}
+.mrHistory li+li{margin-top:12px}
+.mrHistory li>span:first-child{width:8px;height:8px;border-radius:4px;background:rgba(255,255,255,.4);margin:6px 12px 0 0;flex-shrink:0}
+.mrHistory li>span:nth-child(2){flex:1}
+.mrHistory time{color:var(--mr-faint);font-size:12px;white-space:nowrap;margin-left:12px}
+.mrNotes{width:100%;box-sizing:border-box;min-height:96px;background:rgba(255,255,255,.08);color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:4px;padding:8px;font:inherit;font-size:14px;resize:vertical}
+@media (max-width:600px){.mrDl{grid-template-columns:110px minmax(0,1fr)}.mrHead h1,.mrIssueTitle h1{font-size:24px}}
+`;
+
+// ---- Small helpers -------------------------------------------------------------------
+
+function h(tag, attrs, ...children) {
+    const element = document.createElement(tag);
+    for (const [key, value] of Object.entries(attrs || {})) {
+        if (value === null || value === undefined || value === false) {
+            continue;
+        }
+        if (key.startsWith('on')) {
+            element.addEventListener(key.slice(2), value);
+        } else if (key === 'className') {
+            element.className = value;
+        } else if (key === 'style') {
+            element.setAttribute('style', value);
+        } else {
+            element.setAttribute(key, value === true ? '' : String(value));
+        }
+    }
+    for (const child of children.flat(Infinity)) {
+        if (child === null || child === undefined || child === false) {
+            continue;
+        }
+        element.appendChild(typeof child === 'object' ? child : document.createTextNode(String(child)));
+    }
+    return element;
+}
+
+function icon(name) {
+    return h('span', { className: 'mrIcon', 'aria-hidden': 'true' }, name);
+}
+
+function status(code) {
+    return STATUSES.find((s) => s.code === code) || (code === 'Mixed' ? MIXED : { code, label: code, bg: MIXED.bg, fg: MIXED.fg });
+}
+
+function pill(code) {
+    const s = status(code);
+    return h('span', { className: 'mrPill', style: `background:${s.bg};color:${s.fg}` }, s.label);
+}
+
+function plural(count, one, many) {
+    return `${count} ${count === 1 ? one : many}`;
+}
+
+function relative(when) {
+    const date = new Date(when);
+    const minutes = Math.round((Date.now() - date.getTime()) / 60000);
+    if (minutes < 1) {
+        return 'Just now';
+    }
+    if (minutes < 60) {
+        return `${minutes} min ago`;
+    }
+    if (minutes < 24 * 60) {
+        return `${Math.round(minutes / 60)} h ago`;
+    }
+    if (minutes < 6 * 24 * 60) {
+        return date.toLocaleDateString(undefined, { weekday: 'short' });
+    }
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function day(when) {
+    return new Date(when).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function stamp(when) {
+    return new Date(when).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+function position(ticks) {
+    if (ticks === null || ticks === undefined) {
+        return null;
+    }
+    const total = Math.floor(ticks / 10000000);
+    const two = (n) => String(n).padStart(2, '0');
+    return `${Math.floor(total / 3600)}:${two(Math.floor(total / 60) % 60)}:${two(total % 60)}`;
+}
+
+function size(bytes) {
+    if (!bytes) {
+        return null;
+    }
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let value = bytes;
+    let unit = 0;
+    while (value >= 1000 && unit < units.length - 1) {
+        value /= 1000;
+        unit++;
+    }
+    return `${value.toFixed(unit < 2 ? 0 : 1)} ${units[unit]}`;
+}
+
+function mbps(bits) {
+    return bits ? `${(bits / 1000000).toFixed(bits < 10000000 ? 1 : 0)} Mbps` : null;
+}
+
+const PLAY_METHODS = { DirectPlay: 'Direct play', DirectStream: 'Direct stream', Transcode: 'Transcode' };
+
+function playMethod(method) {
+    return PLAY_METHODS[method] || method;
+}
+
+function methods(list) {
+    return (list || []).map((m) => (m.Count > 1 ? `${playMethod(m.Method)} ×${m.Count}` : playMethod(m.Method))).join(' · ');
+}
+
+function poster(itemId) {
+    const url = itemId ? ApiClient.getUrl(`Items/${itemId}/Images/Primary`, { fillHeight: 138, quality: 90 }) : null;
+    return h('span', { className: 'mrPoster', style: url ? `background-image:url("${url}")` : null });
+}
+
+function call(method, path, query, body) {
+    const request = { type: method, url: ApiClient.getUrl(API + path, query || {}), dataType: 'json' };
+    if (body) {
+        request.data = JSON.stringify(body);
+        request.contentType = 'application/json';
+    }
+    return ApiClient.ajax(request);
+}
+
+// A refused call rejects with the fetch Response; its body carries the error code.
+function refusal(failure) {
+    if (failure && typeof failure.json === 'function') {
+        return failure.json().then((body) => body || {}, () => ({}))
+            .then((body) => ({ status: failure.status, code: body.Code || body.code, issueId: body.IssueId || body.issueId }));
+    }
+    return Promise.resolve({ status: 0 });
+}
+
+function pageUrl(params) {
+    const query = new URLSearchParams({ name: PAGE });
+    for (const [key, value] of Object.entries(params)) {
+        if (value !== null && value !== undefined && value !== '' && DEFAULTS[key] !== String(value)) {
+            query.set(key, value);
+        }
+    }
+    return `#/configurationpage?${query.toString()}`;
+}
+
+function listParams(params) {
+    const list = {};
+    for (const key of LIST_KEYS) {
+        if (params[key]) {
+            list[key] = params[key];
+        }
+    }
+    return list;
+}
+
+function addStyles() {
+    if (!document.getElementById('mediaReportsTriageStyles')) {
+        document.head.appendChild(h('style', { id: 'mediaReportsTriageStyles' }, STYLES));
+    }
+}
+
+// ---- The Reports tab -------------------------------------------------------------------
+
+function header(summary) {
+    return h('div', { className: 'mrHead' },
+        h('h1', null, 'Media Reports'),
+        summary ? h('span', { className: 'mrMuted mrSummary', style: 'font-size:14px' },
+            `${plural(summary.OpenIssues, 'open issue', 'open issues')} from ${plural(summary.Reports, 'report', 'reports')} · ${summary.New} new since you last looked`) : null);
+}
+
+function tabs(summary) {
+    return h('nav', { className: 'mrTabs', 'aria-label': 'Media Reports' },
+        h('a', { className: 'mrTab', href: pageUrl({}), 'aria-current': 'page' }, 'Reports',
+            summary ? h('span', { className: 'mrCount' }, summary.OpenIssues) : null));
+}
+
+function skeleton() {
+    const row = () => h('tr', null, ...[60, 50, 20, 60, 70, 40, 30].map((w) => h('td', null, h('span', { className: 'mrSkeleton', style: `width:${w}%` }))));
+    return h('div', { className: 'mrTableBox', 'aria-busy': 'true', 'aria-label': 'Loading reports' },
+        h('table', { className: 'mrTable' }, h('tbody', null, row(), row(), row())));
+}
+
+function couldNotLoad(retry) {
+    return h('div', { className: 'mrPanel mrAlert mrCouldNotLoad', role: 'alert' },
+        icon('error'),
+        h('div', null,
+            h('h2', null, "Reports couldn't be loaded"),
+            h('p', null, "The Media Reports database didn't open. Reports already filed are safe; yesterday's copy is in the plugin's data folder as media-reports.backup.db. The server log has the details."),
+            h('div', { className: 'mrActions' },
+                h('button', { type: 'button', className: 'mrBtn mrPrimary', onclick: retry }, 'Try again'),
+                h('a', { className: 'mrBtn', href: '#/dashboard/logs' }, 'Open the server log'))));
+}
+
+function justInstalled() {
+    return h('div', { className: 'mrPanel mrJustInstalled' },
+        h('h2', null, 'No reports yet'),
+        h('p', null, "Users report with the flag button on a title's page or in the player, in Jellyfin Web, the Android app and the webOS TV app."));
+}
+
+function noMatch(params, navigate) {
+    const parts = [];
+    if (params.reason) {
+        parts.push(`for “${params.reasonLabel || params.reason}”`);
+    }
+    if (params.client) {
+        parts.push(`on ${params.client}`);
+    }
+    if (params.q) {
+        parts.push(`matching “${params.q}”`);
+    }
+    const view = params.view === 'closed' ? 'closed issues' : params.view === 'all' ? 'issues' : 'open issues';
+    return h('div', { className: 'mrPanel mrEmpty mrNoMatch' },
+        h('p', null, `No ${view} ${parts.join(' ')}.`.replace(/ +\./, '.')),
+        h('button', { type: 'button', className: 'mrBtn', onclick: () => navigate({ view: params.view, groupBy: params.groupBy, sort: params.sort }) }, 'Clear filters'));
+}
+
+function controls(params, list, navigate) {
+    const set = (changes) => navigate(Object.assign({}, listParams(params), changes, { page: null }));
+    const segs = (label, key, options) => h('div', { className: 'mrSegs', role: 'group', 'aria-label': label },
+        options.map(([value, text]) => h('button', {
+            type: 'button',
+            className: 'mrSeg',
+            'aria-pressed': String((params[key] || DEFAULTS[key]) === value),
+            onclick: () => set({ [key]: value })
+        }, text)));
+    const select = (label, key, any, options) => h('label', { className: 'mrLabel' }, label,
+        h('select', { className: 'mrSelect', 'data-filter': key, onchange: (e) => set({ [key]: e.target.value || null }) },
+            h('option', { value: '' }, any),
+            options.map(([value, text]) => h('option', { value, selected: params[key] === value }, text))));
+    const search = h('input', { type: 'search', 'aria-label': 'Search titles', placeholder: 'Search titles', value: params.q || '' });
+    let timer = 0;
+    search.addEventListener('input', () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => set({ q: search.value.trim() || null }), 400);
+    });
+    search.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            clearTimeout(timer);
+            set({ q: search.value.trim() || null });
+        }
+    });
+    return h('div', { className: 'mrControls' },
+        segs('Status', 'view', [['open', 'Open'], ['closed', 'Closed'], ['all', 'All']]),
+        segs('Group reports', 'groupBy', [['title', 'By title'], ['titleClient', 'By title and client']]),
+        select('Reason', 'reason', 'Any reason', (list ? list.Reasons : []).map((r) => [r.Code, r.Label])),
+        select('Client', 'client', 'Any client', (list ? list.Clients : []).map((c) => [c, c])),
+        h('div', { className: 'mrSearch' }, icon('search'), search));
+}
+
+function table(params, list, seenNew, navigate) {
+    const sortHeader = (key, text) => {
+        const active = (params.sort || DEFAULTS.sort) === key;
+        return h('th', { scope: 'col', 'aria-sort': active ? (key === 'title' || key === 'status' ? 'ascending' : 'descending') : null },
+            h('button', { type: 'button', onclick: () => navigate(Object.assign({}, listParams(params), { sort: key, page: null })) }, text));
+    };
+    const body = h('tbody');
+    const expanded = new Set();
+    const render = () => {
+        body.textContent = '';
+        for (const row of list.Rows) {
+            body.appendChild(rowElement(row, false));
+            if (row.Kind === 'season' && expanded.has(row.SeriesId + ':' + row.SeasonNumber + ':' + row.ReasonCode)) {
+                body.appendChild(setAllRow(row));
+                for (const child of row.Children) {
+                    body.appendChild(rowElement(child, true));
+                }
+            }
+        }
+    };
+    const issueLink = (row) => h('a', { className: 'mrTitleLink', href: pageUrl(Object.assign({}, listParams(params), { issue: row.IssueId })) }, row.Title);
+    const rowElement = (row, child) => {
+        const key = row.SeriesId + ':' + row.SeasonNumber + ':' + row.ReasonCode;
+        const isNew = row.IsNew || seenNew.has(row.IssueId) || (row.Children || []).some((c) => seenNew.has(c.IssueId));
+        const title = row.Kind === 'season'
+            ? h('button', {
+                type: 'button',
+                className: 'mrTitleLink',
+                'aria-expanded': String(expanded.has(key)),
+                onclick: () => {
+                    if (expanded.has(key)) {
+                        expanded.delete(key);
+                    } else {
+                        expanded.add(key);
+                    }
+                    render();
+                }
+            }, row.Title)
+            : issueLink(row);
+        const line = row.Kind === 'season' ? `${row.Line} · ${plural(row.EpisodeCount, 'episode', 'episodes')}` : row.Line;
+        return h('tr', { className: child ? 'mrChild' : (row.Kind === 'season' ? 'mrSeasonRow' : 'mrIssueRow'), 'data-issue': row.IssueId },
+            h('td', null, h('div', { className: 'mrTitleCell' },
+                h('span', { className: 'mrDotSlot' }, isNew ? h('span', { className: 'mrDot', role: 'img', 'aria-label': 'New since you last looked' }) : null),
+                child ? null : poster(row.Kind === 'season' ? row.SeriesId : row.ItemId),
+                h('span', { className: 'mrTitleText' }, child ? issueLink(Object.assign({}, row, { Title: row.Line })) : title, child ? null : h('span', { className: 'mrLine' }, line || '')))),
+            h('td', null, row.ReasonLabel),
+            h('td', null, h('span', { style: 'font-weight:600;color:#fff' }, row.Reports), h('span', { className: 'mrLine', style: 'display:block' }, plural(row.People, 'person', 'people'))),
+            h('td', { style: 'color:rgba(255,255,255,.8)' }, params.groupBy === 'titleClient' ? (row.Client || 'No playback attached') : (row.Clients || []).join(', ')),
+            h('td', { style: 'color:rgba(255,255,255,.8);font-size:13px' }, methods(row.PlayMethods)),
+            h('td', null, pill(row.Status)),
+            h('td', { style: 'color:rgba(255,255,255,.7);white-space:nowrap' }, h('time', { datetime: row.LastReport }, relative(row.LastReport))));
+    };
+    const setAllRow = (row) => {
+        const message = h('span', { role: 'status', className: 'mrOk', style: 'margin-left:12px' });
+        const select = h('select', { className: 'mrSelect', 'aria-label': 'Set status for all' },
+            h('option', { value: '' }, 'Set status for all…'),
+            STATUSES.filter((s) => s.code !== 'ReplacedVerify').map((s) => h('option', { value: s.code }, s.label)));
+        select.addEventListener('change', () => {
+            if (!select.value) {
+                return;
+            }
+            const ids = row.Children.map((c) => c.IssueId);
+            call('POST', 'Issues/Status', null, { issueIds: ids, status: select.value })
+                .then(() => navigate(listParams(params), true), (failure) => refusal(failure).then((r) => {
+                    message.className = 'mrBad';
+                    message.textContent = r.code === 'newer-open-issue'
+                        ? 'A newer open issue exists for some of these episodes, so none was changed.'
+                        : "The statuses couldn't be changed.";
+                }));
+        });
+        return h('tr', { className: 'mrChild mrSetAll' }, h('td', { colspan: '7' }, select, message));
+    };
+    render();
+    return h('div', { className: 'mrTableBox' },
+        h('table', { className: 'mrTable' },
+            h('thead', null, h('tr', null,
+                sortHeader('title', 'Title'),
+                h('th', { scope: 'col' }, 'Reason'),
+                sortHeader('reports', 'Reports'),
+                h('th', { scope: 'col' }, 'Clients'),
+                h('th', { scope: 'col' }, 'How it played'),
+                sortHeader('status', 'Status'),
+                sortHeader('last', 'Last report'))),
+            body));
+}
+
+function paging(params, list, navigate) {
+    const pages = Math.max(1, Math.ceil(list.Total / list.PageSize));
+    if (pages === 1) {
+        return null;
+    }
+    const go = (page) => navigate(Object.assign({}, listParams(params), { page: page === 1 ? null : page }));
+    return h('nav', { className: 'mrPaging', 'aria-label': 'Pages' },
+        h('span', { className: 'mrMuted mrPageOf' }, `Page ${list.Page} of ${pages}`),
+        h('button', { type: 'button', className: 'mrBtn', disabled: list.Page <= 1, onclick: () => go(list.Page - 1) }, 'Previous'),
+        h('button', { type: 'button', className: 'mrBtn', disabled: list.Page >= pages, onclick: () => go(list.Page + 1) }, 'Next'));
+}
+
+// ---- One issue -------------------------------------------------------------------------
+
+function historyLine(event) {
+    const who = event.ActorName;
+    switch (event.Kind) {
+        case 'filed':
+            return `Reported by ${who || 'a deleted user'}`;
+        case 'withdrawn':
+            return `Report withdrawn by ${who || 'a deleted user'}`;
+        case 'status changed':
+            return `${event.Detail || 'Status changed'}, by ${who || 'Media Reports'}`;
+        case 'note added':
+            return `Notes changed by ${who || 'a deleted user'}`;
+        case 'action run':
+            return `${event.Detail || 'Action run'}, by ${who || 'a deleted user'}`;
+        case 'anonymised':
+            return 'Reporter deleted from the server';
+        default:
+            return event.Detail || event.Kind;
+    }
+}
+
+function reportCard(report) {
+    const snapshot = report.Snapshot;
+    const tags = [report.Client, report.PlayMethod && playMethod(report.PlayMethod), (report.TranscodeReasons || []).join(', '), position(report.PositionTicks) && `at ${position(report.PositionTicks)}`].filter(Boolean);
+    const card = h('article', { className: 'mrCard mrReport' },
+        h('div', { className: 'mrSpread' },
+            h('span', null, h('strong', { style: 'color:#fff;font-weight:600' }, report.ReporterName || 'A deleted user'),
+                report.Device ? h('span', { className: 'mrFaint', style: 'font-size:15px' }, ` on ${report.Device}`) : null),
+            h('time', { className: 'mrFaint', datetime: report.CreatedAt }, stamp(report.CreatedAt))),
+        report.Note ? h('p', { style: 'margin:0;line-height:1.5' }, `“${report.Note}”`) : null,
+        tags.length ? h('div', { className: 'mrTags' }, tags.map((t) => h('span', { className: 'mrTag' }, t))) : null);
+    if (!snapshot) {
+        card.appendChild(h('p', { className: 'mrFaint', style: 'margin:0' }, 'No playback was attached to this report.'));
+        return card;
+    }
+    const details = h('dl', { className: 'mrDl mrDetails', hidden: true });
+    const add = (term, value, mono) => {
+        if (value) {
+            details.appendChild(h('dt', null, term));
+            details.appendChild(h('dd', { className: mono ? 'mrMono' : null }, value));
+        }
+    };
+    const t = snapshot.transcoding;
+    const streams = snapshot.sourceStreams || [];
+    const stream = (index) => streams.find((s) => s.index === index);
+    const describe = (s) => s ? [s.codec && s.codec.toUpperCase(), s.channels && `${s.channels} ch`, s.language].filter(Boolean).join(' ') + ` (${s.index})` : 'none';
+    add('Captured', snapshot.captured ? `${stamp(snapshot.captured)} · ${(snapshot.state || '').toLowerCase()}` : snapshot.state);
+    add('Client', [snapshot.client, snapshot.clientVersion].filter(Boolean).join(' ') + (snapshot.deviceName ? ` · ${snapshot.deviceName}` : ''));
+    add('Play method', snapshot.playMethod && playMethod(snapshot.playMethod));
+    add('Transcode reasons', t && t.transcodeReasons && t.transcodeReasons.length ? t.transcodeReasons.join(', ') : 'none', true);
+    add('Output', t ? [t.videoCodec && t.videoCodec.toUpperCase(), t.width && t.height && `${t.width}×${t.height}`, mbps(t.bitrate), t.audioCodec && t.audioCodec.toUpperCase(), `hardware ${t.hardwareAccelerationType || 'none'}`].filter(Boolean).join(' · ') : 'Original file');
+    add('Audio / subtitle', `${describe(stream(snapshot.audioStreamIndex))} / ${describe(stream(snapshot.subtitleStreamIndex))}`);
+    const toggle = h('button', { type: 'button', className: 'mrLinkBtn', 'aria-expanded': 'false' }, icon('expand_more'), 'Playback details');
+    toggle.addEventListener('click', () => {
+        const open = toggle.getAttribute('aria-expanded') !== 'true';
+        toggle.setAttribute('aria-expanded', String(open));
+        toggle.firstChild.textContent = open ? 'expand_less' : 'expand_more';
+        details.hidden = !open;
+    });
+    card.appendChild(toggle);
+    card.appendChild(details);
+    return card;
+}
+
+function fileCard(issue) {
+    const file = issue.File;
+    const dl = h('dl', { className: 'mrDl' });
+    const add = (term, value, mono) => {
+        if (value) {
+            dl.appendChild(h('dt', null, term));
+            dl.appendChild(h('dd', { className: mono ? 'mrMono' : null }, value));
+        }
+    };
+    if (!file.InLibrary) {
+        add('Path', file.Path, true);
+        return h('section', { className: 'mrCard mrFile' }, h('h2', { className: 'mrH3' }, 'File'),
+            h('p', { className: 'mrBad', style: 'margin:0;font-size:14px' }, 'This title is no longer in the library.'), dl);
+    }
+    if (issue.ItemType === 'Season' || issue.ItemType === 'Series') {
+        add('Folder', file.Path, true);
+        add('Episodes', String(file.EpisodeCount));
+    } else {
+        const streams = file.Streams || [];
+        const video = streams.find((s) => s.Type === 'Video');
+        const list = (type) => streams.filter((s) => s.Type === type).map((s, i) => `${i + 1}. ${s.Title || [s.Codec, s.Language].filter(Boolean).join(' ')}`);
+        add('Path', file.Path, true);
+        add('Size', [size(file.Size), file.DateAdded && `added ${day(file.DateAdded)}`].filter(Boolean).join(' · '));
+        add('Container', [file.Container && file.Container.toUpperCase(), mbps(file.Bitrate)].filter(Boolean).join(' · '));
+        add('Video', video ? [video.Codec && video.Codec.toUpperCase(), video.Profile, video.Width && `${video.Width}×${video.Height}`, video.VideoRange, video.FrameRate && `${Math.round(video.FrameRate * 1000) / 1000} fps`].filter(Boolean).join(' · ') : null);
+        const audio = list('Audio');
+        const subtitles = list('Subtitle');
+        if (audio.length) {
+            add('Audio', h('span', null, audio.map((a, i) => [i ? h('br') : null, a])));
+        }
+        add('Subtitles', subtitles.length ? subtitles.join(', ') : 'none');
+    }
+    return h('section', { className: 'mrCard mrFile' }, h('h2', { className: 'mrH3' }, 'File'), dl);
+}
+
+// jellyfin-web keeps earlier views in the page, so ids are made unique per view.
+let ids = 0;
+// A message to show once the issue has been loaded again, such as "Scan started".
+let pending = null;
+
+function issuePage(params, issue, navigate) {
+    const statusId = `mediaReportsStatus${++ids}`;
+    const notesId = `mediaReportsNotes${ids}`;
+    const back = h('a', { className: 'mrBack', href: pageUrl(listParams(params)) }, icon('arrow_back'), 'All reports');
+    const message = h('p', { role: 'status', className: 'mrOk mrMessage', style: 'margin:0' });
+    const say = (text, bad) => {
+        message.className = (bad ? 'mrBad' : 'mrOk') + ' mrMessage';
+        message.textContent = '';
+        message.appendChild(typeof text === 'string' ? document.createTextNode(text) : text);
+    };
+    const reload = () => navigate(Object.assign({}, listParams(params), { issue: issue.Id }), true);
+    const action = (path, started) => () => call('POST', `Issues/${issue.Id}/${path}`).then(() => {
+        pending = started;
+        reload();
+    }, (failure) => refusal(failure).then((r) => say(r.code === 'not-in-library' ? 'This title is no longer in the library.' : "That couldn't be started.", true)));
+    const inLibrary = issue.File.InLibrary;
+    const reports = issue.Reports;
+    const first = reports.length ? reports[reports.length - 1].CreatedAt : issue.CreatedAt;
+    const last = reports.length ? reports[0].CreatedAt : issue.CreatedAt;
+
+    const statusSelect = h('select', { id: statusId, className: 'mrSelect mrStatusSelect' },
+        STATUSES.filter((s) => s.code !== 'ReplacedVerify' || issue.Status === 'ReplacedVerify')
+            .map((s) => h('option', { value: s.code, selected: s.code === issue.Status, disabled: s.code === 'ReplacedVerify' }, s.label)));
+    statusSelect.addEventListener('change', () => {
+        call('PATCH', `Issues/${issue.Id}`, null, { status: statusSelect.value }).then(reload, (failure) => refusal(failure).then((r) => {
+            statusSelect.value = issue.Status;
+            if (r.code === 'newer-open-issue') {
+                say(h('span', null, 'A newer open issue exists for this title and reason, so this one stays closed. ',
+                    h('a', { href: pageUrl(Object.assign({}, listParams(params), { issue: r.issueId })) }, 'Open the newer issue')), true);
+            } else {
+                say("The status couldn't be changed.", true);
+            }
+        }));
+    });
+
+    const notes = h('textarea', { id: notesId, className: 'mrNotes', maxlength: '10000' });
+    notes.value = issue.Notes || '';
+    const saveNotes = h('button', { type: 'button', className: 'mrBtn' }, 'Save notes');
+    saveNotes.addEventListener('click', () => call('PATCH', `Issues/${issue.Id}`, null, { notes: notes.value }).then(reload,
+        (failure) => refusal(failure).then((r) => say(r.code === 'notes-too-long' ? 'Notes are limited to 10,000 characters.' : "The notes couldn't be saved.", true))));
+
+    if (pending) {
+        say(pending);
+        pending = null;
+    }
+
+    const jellyfinUrl = `${ApiClient.serverAddress()}/web/#/details?id=${issue.ItemId}&serverId=${issue.ServerId}`;
+    return h('div', { className: 'mediaReportsIssue', 'data-issue': issue.Id, style: 'display:flex;flex-direction:column' },
+        back,
+        h('div', { className: 'mrIssueHead', style: 'margin-top:10px' },
+            poster(issue.ItemId),
+            h('div', { className: 'mrIssueTitle' },
+                h('h1', null, issue.Title),
+                issue.Line ? h('p', { className: 'mrMuted' }, issue.Line) : null,
+                h('p', { className: 'mrMuted mrIssueSummary' }, `${issue.ReasonLabel} · ${plural(reports.length, 'report', 'reports')} from ${plural(issue.People, 'person', 'people')} · first ${day(first)}, last ${day(last)}`),
+                inLibrary ? h('div', { className: 'mrActions' },
+                    h('a', { className: 'mrBtn', href: jellyfinUrl, target: '_blank', rel: 'noopener' }, icon('open_in_new'), 'Open in Jellyfin'),
+                    h('button', { type: 'button', className: 'mrBtn', onclick: action('Refresh', 'Refresh started') }, icon('refresh'), 'Refresh metadata'),
+                    h('button', { type: 'button', className: 'mrBtn', onclick: action('Scan', 'Scan started') }, icon('sync'), 'Scan library')) : null,
+                message),
+            h('div', { className: 'mrStatusBox' },
+                h('label', { for: statusId, className: 'mrFaint' }, 'Status'),
+                statusSelect,
+                h('span', { className: 'mrFaint', style: 'font-size:12px' }, `Closing notifies the ${plural(issue.People, 'person', 'people')} who reported it.`))),
+        h('div', { className: 'mrColumns', style: 'margin-top:10px' },
+            h('section', { className: 'mrReports', 'aria-label': 'Reports' },
+                h('h2', { className: 'mrH3' }, 'Reports'),
+                reports.map(reportCard)),
+            h('aside', { className: 'mrAside' },
+                h('section', { className: 'mrCard mrNotesCard' },
+                    h('h2', { className: 'mrH3' }, h('label', { for: notesId }, 'Notes (only admins see them)')),
+                    notes,
+                    saveNotes),
+                fileCard(issue),
+                h('section', { className: 'mrCard mrHistoryCard' },
+                    h('h2', { className: 'mrH3' }, 'History'),
+                    h('ol', { className: 'mrHistory' }, issue.History.map((event) =>
+                        h('li', null, h('span'), h('span', null, historyLine(event)), h('time', { datetime: event.At }, stamp(event.At)))))))));
+}
+
+// ---- The page --------------------------------------------------------------------------
+
+// One visit to the page spans its own navigation, which jellyfin-web loads as new views.
+// Issues new when the visit started keep their dot after the visit is recorded; the visit
+// ends once the page has been off screen for a moment.
+const visit = { marked: false, seenNew: new Set(), lastOnScreen: 0 };
+const roots = new Set();
+setInterval(() => {
+    for (const root of roots) {
+        if (root.isConnected && root.offsetParent !== null) {
+            visit.lastOnScreen = Date.now();
+        }
+    }
+}, 500);
+
+export default function (view) {
+    const root = view.querySelector('.mediaReportsTriage');
+    const seenNew = visit.seenNew;
+    let generation = 0;
+    roots.add(root);
+
+    function current() {
+        const query = new URLSearchParams((window.location.hash.split('?')[1] || ''));
+        const params = {};
+        query.forEach((value, key) => {
+            params[key] = value;
+        });
+        return params;
+    }
+
+    function navigate(params, replace) {
+        const url = pageUrl(params);
+        if (replace || url === window.location.hash) {
+            show();
+            return;
+        }
+        window.location.hash = url.slice(1);
+    }
+
+    function show() {
+        if (Date.now() - visit.lastOnScreen > 1500) {
+            visit.marked = false;
+            seenNew.clear();
+        }
+        visit.lastOnScreen = Date.now();
+        const params = current();
+        const mine = ++generation;
+        addStyles();
+        root.textContent = '';
+        if (params.issue) {
+            root.appendChild(skeleton());
+            call('GET', `Issues/${encodeURIComponent(params.issue)}`).then((issue) => {
+                if (mine === generation) {
+                    root.textContent = '';
+                    root.appendChild(issuePage(params, issue, navigate));
+                }
+            }, (failure) => refusal(failure).then((r) => {
+                if (mine === generation) {
+                    root.textContent = '';
+                    root.appendChild(r.status === 404
+                        ? h('div', { className: 'mrPanel mrEmpty' }, h('p', null, 'That issue no longer exists.'), h('a', { className: 'mrBtn', href: pageUrl(listParams(params)) }, 'All reports'))
+                        : couldNotLoad(show));
+                }
+            }));
+            return;
+        }
+
+        root.appendChild(header(null));
+        root.appendChild(tabs(null));
+        root.appendChild(controls(params, null, navigate));
+        root.appendChild(skeleton());
+        const query = { view: params.view || DEFAULTS.view, groupBy: params.groupBy || DEFAULTS.groupBy, sort: params.sort || DEFAULTS.sort, page: params.page || 1 };
+        for (const key of ['reason', 'client', 'q']) {
+            if (params[key]) {
+                query[key] = params[key];
+            }
+        }
+        call('GET', 'Issues', query)
+            .then((list) => call('GET', 'Summary', { markSeen: !visit.marked }).then((summary) => [list, summary]))
+            .then(([list, summary]) => {
+                if (mine !== generation) {
+                    return;
+                }
+                if (!visit.marked) {
+                    visit.marked = true;
+                    list.Rows.flatMap((r) => [r].concat(r.Children || [])).filter((r) => r.IsNew).forEach((r) => seenNew.add(r.IssueId));
+                    document.dispatchEvent(new CustomEvent('mediareports:seen'));
+                }
+                const filtered = params.reason || params.client || params.q;
+                root.textContent = '';
+                root.appendChild(header(summary));
+                root.appendChild(tabs(summary));
+                if (list.Total === 0 && !filtered && summary.OpenIssues === 0 && (params.view || 'open') !== 'closed') {
+                    const waiting = root.appendChild(skeleton());
+                    return call('GET', 'Issues', { view: 'all' }).then((all) => {
+                        if (mine !== generation) {
+                            return;
+                        }
+                        root.removeChild(waiting);
+                        if (all.Total === 0) {
+                            root.appendChild(justInstalled());
+                        } else {
+                            root.appendChild(controls(params, list, navigate));
+                            root.appendChild(noMatch(params, navigate));
+                        }
+                    });
+                }
+                root.appendChild(controls(params, list, navigate));
+                if (list.Total === 0) {
+                    const reason = list.Reasons.find((r) => r.Code === params.reason);
+                    root.appendChild(noMatch(Object.assign({}, params, { reasonLabel: reason && reason.Label }), navigate));
+                    return null;
+                }
+                root.appendChild(table(params, list, seenNew, navigate));
+                const pages = paging(params, list, navigate);
+                if (pages) {
+                    root.appendChild(pages);
+                }
+                root.appendChild(h('p', { className: 'mrFaint', style: 'margin-top:20px' },
+                    'A report joins the open issue for the same title and reason; after that issue closes, a new report starts a new one. Episodes roll up into their season when three or more episodes share a reason.'));
+                return null;
+            })
+            .catch(() => {
+                if (mine === generation) {
+                    root.textContent = '';
+                    root.appendChild(header(null));
+                    root.appendChild(couldNotLoad(show));
+                }
+            });
+    }
+
+    // jellyfin-web loads a new view for each URL and shows a kept one again on Back.
+    view.addEventListener('viewshow', show);
+    view.addEventListener('viewdestroy', () => roots.delete(root));
+}

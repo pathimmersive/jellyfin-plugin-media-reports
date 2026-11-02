@@ -54,3 +54,7 @@ jobs:
       - run: bash scripts/smoke-web.sh
         env:
           SMOKE_PYTHON: artifacts/playwright/bin/python
+      # Drives the Media Reports page in the Dashboard as the admin, at 1280 and 390 px.
+      - run: bash scripts/smoke-triage.sh
+        env:
+          SMOKE_PYTHON: artifacts/playwright/bin/python

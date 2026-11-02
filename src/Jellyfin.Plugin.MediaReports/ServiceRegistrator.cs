@@ -37,6 +37,15 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
             provider.GetRequiredService<ReportStore>(),
             () => Plugin.Instance?.Configuration ?? new PluginConfiguration(),
             TimeProvider.System));
+        serviceCollection.AddSingleton(provider => new AdminService(
+            provider.GetRequiredService<ReportStore>(),
+            provider.GetRequiredService<MediaBrowser.Controller.Library.ILibraryManager>(),
+            provider.GetRequiredService<MediaBrowser.Controller.Library.IUserManager>(),
+            provider.GetRequiredService<MediaBrowser.Controller.Library.IMediaSourceManager>(),
+            provider.GetRequiredService<MediaBrowser.Controller.Providers.IProviderManager>(),
+            provider.GetRequiredService<MediaBrowser.Model.IO.IFileSystem>(),
+            () => Plugin.Instance?.Configuration ?? new PluginConfiguration(),
+            () => applicationHost.SystemId));
         serviceCollection.AddScoped<IEventConsumer<UserDeletedEventArgs>, UserDeletedConsumer>();
         serviceCollection.AddTransient<IStartupFilter, IndexPageStartupFilter>();
     }

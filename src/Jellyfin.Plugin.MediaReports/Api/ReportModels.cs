@@ -32,7 +32,8 @@ public enum Outcome
 /// <param name="Value">The value, when it worked.</param>
 /// <param name="Code">The error code, when it didn't.</param>
 /// <param name="Message">A short explanation, when it didn't.</param>
-public sealed record ServiceResult<T>(Outcome Outcome, T? Value = default, string? Code = null, string? Message = null)
+/// <param name="IssueIds">The issues a refusal names, when it names any.</param>
+public sealed record ServiceResult<T>(Outcome Outcome, T? Value = default, string? Code = null, string? Message = null, IReadOnlyList<long>? IssueIds = null)
 {
     /// <summary>
     /// A successful result.
@@ -49,6 +50,16 @@ public sealed record ServiceResult<T>(Outcome Outcome, T? Value = default, strin
     /// <param name="message">A short explanation.</param>
     /// <returns>The result.</returns>
     public static ServiceResult<T> Refuse(Outcome outcome, string code, string message) => new(outcome, default, code, message);
+
+    /// <summary>
+    /// A refusal that names issues.
+    /// </summary>
+    /// <param name="outcome">Why.</param>
+    /// <param name="code">The error code.</param>
+    /// <param name="message">A short explanation.</param>
+    /// <param name="issueIds">The issues it names.</param>
+    /// <returns>The result.</returns>
+    public static ServiceResult<T> Refuse(Outcome outcome, string code, string message, IReadOnlyList<long> issueIds) => new(outcome, default, code, message, issueIds);
 }
 
 /// <summary>

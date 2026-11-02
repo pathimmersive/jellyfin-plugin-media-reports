@@ -135,6 +135,109 @@ public sealed class ReportStore
     }
 
     /// <summary>
+    /// Changes an issue's status and notes together; nothing changes when the status change is refused.
+    /// </summary>
+    /// <param name="issueId">The issue.</param>
+    /// <param name="status">The new status, or null to keep it.</param>
+    /// <param name="notes">The new notes, or null to keep them.</param>
+    /// <param name="actorUserId">The admin.</param>
+    /// <returns>What happened to the status; <see cref="StatusChange.Unchanged"/> when only notes were given.</returns>
+    public StatusChangeResult UpdateIssue(long issueId, IssueStatus? status, string? notes, Guid actorUserId)
+    {
+        var now = Now();
+        using var connection = _db.OpenConnection();
+        using var transaction = Transaction.Begin(connection, immediate: true);
+        var current = Rows(connection, "SELECT admin_notes FROM issue WHERE id = $id", r => (Found: true, Notes: r.IsDBNull(0) ? null : r.GetString(0)), ("$id", issueId)).SingleOrDefault();
+        if (!current.Found)
+        {
+            return new StatusChangeResult(StatusChange.NotFound);
+        }
+
+        var result = new StatusChangeResult(StatusChange.Unchanged);
+        if (status is { } next)
+        {
+            result = SetStatus(connection, issueId, next, actorUserId, now, null);
+            if (result.Result == StatusChange.NewerOpenIssue)
+            {
+                return result;
+            }
+        }
+
+        var cleared = string.IsNullOrEmpty(notes) ? null : notes;
+        if (notes is not null && !string.Equals(cleared, current.Notes, StringComparison.Ordinal))
+        {
+            Execute(connection, "UPDATE issue SET admin_notes = $notes, updated_at = $now WHERE id = $id", ("$notes", cleared), ("$now", now), ("$id", issueId));
+            AddEvent(connection, now, issueId, null, actorUserId, "note added", null);
+        }
+
+        transaction.Commit();
+        return result;
+    }
+
+    /// <summary>
+    /// Sets one status on several issues in one transaction. If any is refused, none changes.
+    /// </summary>
+    /// <param name="issueIds">The issues.</param>
+    /// <param name="status">The new status.</param>
+    /// <param name="actorUserId">The admin.</param>
+    /// <returns>The refused issues with why; empty when every issue was set.</returns>
+    public IReadOnlyList<(long IssueId, StatusChangeResult Result)> SetStatuses(IReadOnlyCollection<long> issueIds, IssueStatus status, Guid actorUserId)
+    {
+        var now = Now();
+        using var connection = _db.OpenConnection();
+        using var transaction = Transaction.Begin(connection, immediate: true);
+        var refused = new List<(long, StatusChangeResult)>();
+        foreach (var id in issueIds.Distinct())
+        {
+            var result = SetStatus(connection, id, status, actorUserId, now, null);
+            if (result.Result is StatusChange.NotFound or StatusChange.NewerOpenIssue)
+            {
+                refused.Add((id, result));
+            }
+        }
+
+        if (refused.Count == 0)
+        {
+            transaction.Commit();
+        }
+
+        return refused;
+    }
+
+    /// <summary>
+    /// Records an admin's quick action in an issue's history.
+    /// </summary>
+    /// <param name="issueId">The issue.</param>
+    /// <param name="actorUserId">The admin.</param>
+    /// <param name="detail">What was run.</param>
+    public void AddActionEvent(long issueId, Guid actorUserId, string detail)
+    {
+        using var connection = _db.OpenConnection();
+        AddEvent(connection, Now(), issueId, null, actorUserId, "action run", detail);
+    }
+
+    /// <summary>
+    /// Gets issues with their reports, for the admin's list.
+    /// </summary>
+    /// <param name="closed">True for closed issues, false for open ones, null for all.</param>
+    /// <returns>The issues, each with its reports newest first.</returns>
+    public IReadOnlyList<(StoredIssue Issue, IReadOnlyList<StoredReport> Reports)> GetIssuesWithReports(bool? closed)
+    {
+        using var connection = _db.OpenConnection();
+        using var transaction = Transaction.Begin(connection, immediate: false);
+        var filter = closed switch
+        {
+            true => "WHERE closed_at IS NOT NULL",
+            false => "WHERE closed_at IS NULL",
+            null => string.Empty,
+        };
+        var issues = Rows(connection, $"SELECT * FROM issue {filter} ORDER BY id", ReadIssue);
+        var reports = Rows(connection, $"SELECT * FROM report WHERE issue_id IN (SELECT id FROM issue {filter}) ORDER BY created_at DESC, id DESC", ReadReport)
+            .ToLookup(r => r.IssueId);
+        return issues.Select(i => (i, (IReadOnlyList<StoredReport>)reports[i.Id].ToList())).ToList();
+    }
+
+    /// <summary>
     /// Deletes closed issues, with their reports and events, that closed longer ago than
     /// the retention period. Open issues are never deleted; a period of 0 or less keeps everything.
     /// </summary>

@@ -64,9 +64,11 @@ if [[ $with_plugin -eq 1 ]]; then
 fi
 
 api=""
+last_start=""
 start_server() {
   local since
   since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  last_start="$since"
   docker start "$container" >/dev/null
   local port
   port="$(docker port "$container" 8096/tcp | head -n 1 | sed 's/.*://')"
@@ -185,7 +187,10 @@ PY
 MSYS_NO_PATHCONV=1 docker cp "$(host_path "$seed")" "$container:$db_dir/media-reports.db"
 start_server
 token="$(sign_in admin admin-password)"
-docker logs "$container" 2>&1 | grep -q "migrated to schema version 2" || fail "the version 1 database was not migrated"
+if ! docker logs --since "$last_start" "$container" 2>&1 | grep -q "migrated to schema version 2"; then
+  docker logs --since "$last_start" "$container" 2>&1 | grep -i -E "media ?reports|sqlite|error" | tail -40
+  fail "the version 1 database was not migrated"
+fi
 export_reports migrated
 py - "$work/results/migrated.json" <<'PY' || fail "the migrated database is not as seeded"
 import json, sys

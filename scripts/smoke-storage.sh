@@ -187,19 +187,21 @@ PY
 MSYS_NO_PATHCONV=1 docker cp "$(host_path "$seed")" "$container:$db_dir/media-reports.db"
 start_server
 token="$(sign_in admin admin-password)"
-if ! docker logs --since "$last_start" "$container" 2>&1 | grep "migrated to schema version 2" >/dev/null; then
+current="$(sed -n 's/.*public const int SchemaVersion = \([0-9]*\);.*/\1/p' src/Jellyfin.Plugin.MediaReports/Storage/ReportDatabase.cs)"
+[[ -n "$current" ]] || fail "could not read the current schema version"
+if ! docker logs --since "$last_start" "$container" 2>&1 | grep "migrated to schema version $current" >/dev/null; then
   docker logs --since "$last_start" "$container" 2>&1 | grep -i -E "media ?reports|sqlite|error" | tail -40
   fail "the version 1 database was not migrated"
 fi
 export_reports migrated
-py - "$work/results/migrated.json" <<'PY' || fail "the migrated database is not as seeded"
+py - "$work/results/migrated.json" "$current" <<'PY' || fail "the migrated database is not as seeded"
 import json, sys
 d = json.load(open(sys.argv[1]))
-assert d["schemaVersion"] == 2, d["schemaVersion"]
+assert d["schemaVersion"] == int(sys.argv[2]), (d["schemaVersion"], sys.argv[2])
 assert len(d["issues"]) == 3 and len(d["reports"]) == 3, (len(d["issues"]), len(d["reports"]))
 assert all("resolutionText" not in i for i in d["issues"])
 assert all(r["snapshot"]["schemaVersion"] == 1 for r in d["reports"])
-print("migrated: schema 2, 3 issues, 3 reports, snapshots readable")
+print("migrated: schema %d, 3 issues, 3 reports, snapshots readable" % d["schemaVersion"])
 PY
 
 echo "== the export is admin-only"

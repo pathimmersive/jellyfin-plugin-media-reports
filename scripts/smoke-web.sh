@@ -559,7 +559,8 @@ def run(p, layout, user, context_args):
 
 MINE = ".mediaReportsDialog.mediaReportsMine"
 SECRET = "Secret admin note: re-encoded from the source."
-FOOTNOTE = "Closed reports are removed a year after they close."
+EXPIRY = "Expires in 12 months"
+CLOSED = ("Fixed", "Won't fix")
 PILLS = {
     "New": ("rgba(0, 164, 220, 0.18)", "rgb(79, 195, 236)"),
     "Being looked at": ("rgba(242, 176, 30, 0.18)", "rgb(245, 196, 81)"),
@@ -580,9 +581,13 @@ MINE_STATE = """() => {
     rows: [...d.querySelectorAll('.mediaReportsRow')].map(row => ({
       title: text('.mediaReportsRowTitle', row), meta: text('.mediaReportsRowMeta', row),
       pill: pill(row.querySelector('.mediaReportsPill')), unread: row.classList.contains('mr-unread'),
-      dot: !!row.querySelector('.mediaReportsUnreadDot'), tag: row.tagName
+      dot: !!row.querySelector('.mediaReportsUnreadDot'), tag: row.tagName,
+      action: (() => { const a = row.parentElement.querySelector('.mediaReportsRowAction'); return a && a.offsetParent !== null ? a.className.replace('mediaReportsRowAction', '').trim() : null; })(),
+      actionLabel: (() => { const a = row.parentElement.querySelector('.mediaReportsRowAction'); return a ? a.getAttribute('aria-label') : null; })()
     })),
-    footnote: text('.mediaReportsFootnote'), empty: text('.mediaReportsEmpty'), emptyHint: text('.mediaReportsEmptyHint'),
+    clear: text('.mediaReportsClear'),
+    footnote: [...d.querySelectorAll('p')].some(e => /removed a year/.test(e.textContent)),
+    empty: text('.mediaReportsEmpty'), emptyHint: text('.mediaReportsEmptyHint'),
     detail: d.querySelector('.mediaReportsDetail') ? {
       title: text('.mediaReportsDetail .mediaReportsRowTitle'), pill: pill(d.querySelector('.mediaReportsDetail .mediaReportsPill')),
       facts: [...d.querySelectorAll('.mediaReportsFacts dd')].map(e => e.textContent.trim()),
@@ -712,7 +717,7 @@ def open_mine_from_menu(page, where):
     return True
 
 
-def check_list(state, rows, where):
+def check_list(state, rows, where, layout):
     got = [(r["title"], r["pill"]["text"] if r["pill"] else None) for r in state["rows"]]
     check(got == [(t, s) for t, s, _ in rows], where + ": the reports are listed newest first with their titles and statuses (%s)" % got)
     for r in state["rows"]:
@@ -720,7 +725,21 @@ def check_list(state, rows, where):
         check(want is not None and (r["pill"]["bg"], r["pill"]["color"]) == want,
               where + ": the %s pill has the approved colours (%s on %s)" % (r["pill"] and r["pill"]["text"], r["pill"] and r["pill"]["color"], r["pill"] and r["pill"]["bg"]))
     check(all(r["meta"] and r["meta"].split(" · ")[0] in REASONS for r in state["rows"]), where + ": each row names its reason and when")
-    check(state["footnote"] == FOOTNOTE, where + ": the list ends with the retention footnote")
+    check(not state["footnote"], where + ": there is no retention footnote")
+    for r in state["rows"]:
+        status = r["pill"]["text"] if r["pill"] else None
+        closed = status in CLOSED
+        check(r["meta"] and (r["meta"].endswith(" · " + EXPIRY) if closed else "Expires" not in r["meta"]),
+              where + ": the %s row %s (%s)" % (status, "ends with \"%s\"" % EXPIRY if closed else "shows no expiry", r["meta"]))
+        if layout == "tv":
+            want = None
+        else:
+            want = "mediaReportsHide" if closed else "mediaReportsRowWithdraw" if status == "New" else None
+        check(r["action"] == want, where + ": the %s row's button is %s (%s)" % (status, want or "none", r["action"]))
+    if layout == "tv":
+        check(state["clear"] is None, where + ": the TV offers no Clear all closed")
+    else:
+        check(state["clear"] == "Clear all closed", where + ": Clear all closed sits under the list (%s)" % state["clear"])
     check(SECRET not in state["all"], where + ": the admin's note is nowhere in My Reports")
 
 
@@ -742,6 +761,83 @@ def back_to_list(page, layout):
     else:
         page.locator(MINE + " .mediaReportsBack").click()
     page.wait_for_selector(MINE + " .mediaReportsRow", timeout=WAIT_MS)
+
+
+def row_index(page, wanted):
+    return [(r["title"], r["pill"]["text"]) for r in mine_state(page)["rows"]].index(wanted)
+
+
+def listed(page):
+    return [(r["title"], r["pill"]["text"]) for r in mine_state(page)["rows"]]
+
+
+def stored(user):
+    return {r["reasonCode"] for r in admin("/MediaReports/Admin/Export")["reports"] if r["reporterName"] == user}
+
+
+def row_withdraw(page, where, wanted, user):
+    item = page.locator(MINE + " .mediaReportsItem").nth(row_index(page, wanted))
+    item.locator(".mediaReportsRowWithdraw").click()
+    page.wait_for_selector(MINE + " .mediaReportsItem .mediaReportsConfirm", timeout=WAIT_MS)
+    check(mine_state(page)["confirm"] == "Withdraw this report?", where + ': the row\'s Withdraw asks "Withdraw this report?"')
+    page.locator(MINE + " .mediaReportsKeep").click()
+    page.wait_for_timeout(300)
+    check(mine_state(page)["confirm"] is None and wanted in listed(page), where + ": Keep it leaves the report in the list")
+    before = len(listed(page))
+    item.locator(".mediaReportsRowWithdraw").click()
+    page.locator(MINE + " .mediaReportsWithdrawConfirm").click()
+    page.wait_for_function("n => document.querySelectorAll('.mediaReportsMine .mediaReportsRow').length === n", arg=before - 1, timeout=WAIT_MS)
+    check(wanted not in listed(page) and "other" not in stored(user), where + ": Withdraw from the row withdraws it (%s)" % listed(page))
+
+
+def remove_row(page, where, wanted, user):
+    before = len(listed(page))
+    item = page.locator(MINE + " .mediaReportsItem").nth(row_index(page, wanted))
+    check(item.locator(".mediaReportsHide").get_attribute("aria-label") == "Remove from list", where + ": the closed row's button is named Remove from list")
+    item.locator(".mediaReportsHide").click()
+    page.wait_for_function("n => document.querySelectorAll('.mediaReportsMine .mediaReportsRow').length === n", arg=before - 1, timeout=WAIT_MS)
+    s = mine_state(page)
+    check(wanted not in listed(page) and s["confirm"] is None, where + ": Remove from list takes it out at once, without asking (%s)" % listed(page))
+    check(s["focusInside"], where + ": focus stays in My Reports")
+    check("stutter" in stored(user), where + ": the removed report is still on the server for the admin")
+
+
+def clear_closed(page, where, user):
+    rows = listed(page)
+    closed = [r for r in rows if r[1] in CLOSED]
+    page.locator(MINE + " .mediaReportsClear").click()
+    page.wait_for_selector(MINE + " .mediaReportsClearArea .mediaReportsConfirm", timeout=WAIT_MS)
+    want = "Remove the closed report from your list?" if len(closed) == 1 else "Remove %d closed reports from your list?" % len(closed)
+    check(mine_state(page)["confirm"] == want, where + ': Clear all closed asks "%s" (%s)' % (want, mine_state(page)["confirm"]))
+    page.locator(MINE + " .mediaReportsClearCancel").click()
+    page.wait_for_timeout(300)
+    check(listed(page) == rows and mine_state(page)["clear"] == "Clear all closed", where + ": Cancel keeps every report")
+    page.locator(MINE + " .mediaReportsClear").click()
+    page.locator(MINE + " .mediaReportsClearConfirm").click()
+    page.wait_for_function("n => document.querySelectorAll('.mediaReportsMine .mediaReportsRow').length === n", arg=len(rows) - len(closed), timeout=WAIT_MS)
+    s = mine_state(page)
+    check(listed(page) == [r for r in rows if r[1] not in CLOSED] and s["clear"] is None,
+          where + ": confirming removes only the closed reports, and the button goes (%s)" % listed(page))
+    check({"poor-quality"} <= stored(user), where + ": the cleared reports are still on the server for the admin")
+
+
+def my_reports_expiry(p):
+    # The expiry follows the server's retention period; at 0 nothing expires.
+    for days, want in ((30, "Expires in 30 days"), (0, None)):
+        configure(ReportRetentionDays=days)
+        b = browser(p)
+        page = b.new_context(viewport={"width": 1440, "height": 900}).new_page()
+        sign_in(page, "carol")
+        page.wait_for_timeout(1000)
+        page.evaluate("window.MediaReports.myReports()")
+        wait_mine(page)
+        page.wait_for_selector(MINE + " .mediaReportsRow", timeout=WAIT_MS)
+        metas = [(r["pill"]["text"], r["meta"]) for r in mine_state(page)["rows"]]
+        closed = [m for st, m in metas if st in CLOSED]
+        check(closed and all((m.endswith(" · " + want) if want else "Expires" not in m) for m in closed),
+              "retention %d days: closed rows %s (%s)" % (days, 'read "%s"' % want if want else "show no expiry", closed))
+        b.close()
+    configure(ReportRetentionDays=365)
 
 
 def my_reports(p, layout, user, context_args):
@@ -790,7 +886,7 @@ def my_reports(p, layout, user, context_args):
         check(("mr-" + layout) in s["cls"] and s["w"] == s["vw"] and s["h"] == s["vh"], where + ": full screen (%dx%d)" % (s["w"], s["h"]))
     check(s["heading"] == "My Reports", where + ": headed My Reports")
     check(s["focusInside"], where + ": focus moves into it")
-    check_list(s, rows, where)
+    check_list(s, rows, where, layout)
     check([r["unread"] and r["dot"] for r in s["rows"]] == [st != "New" for _, st, _ in rows], where + ": the three changed reports are marked unread")
 
     by_code = {code: (t, st) for t, st, code in rows}
@@ -816,6 +912,7 @@ def my_reports(p, layout, user, context_args):
     elif layout == "desktop":
         check(new["withdraw"], where + ": a New report offers Withdraw")
         back_to_list(page, layout)
+        row_withdraw(page, where, by_code["other"], user)
     else:
         check(new["withdraw"], where + ": a New report offers Withdraw")
         page.locator(MINE + " .mediaReportsWithdraw").click()
@@ -840,6 +937,11 @@ def my_reports(p, layout, user, context_args):
     back_to_list(page, layout)
     s = mine_state(page)
     check(not any(r["unread"] for r in s["rows"]), where + ": opening each changed report clears its mark")
+
+    if layout == "desktop":
+        remove_row(page, where, by_code["stutter"], user)
+    if layout != "tv":
+        clear_closed(page, where, user)
 
     page.keyboard.press("Escape")
     wait_mine(page, open_=False)
@@ -925,6 +1027,7 @@ with sync_playwright() as p:
     my_reports(p, "phone", "bob", PHONE)
     my_reports(p, "tv", "carol", {"viewport": {"width": 1280, "height": 720}})
     my_reports_empty(p)
+    my_reports_expiry(p)
 
     # A retired reason isn't offered; switched off, the page carries no script and no button.
     original = admin("/Plugins/%s/Configuration" % cfg["plugin_id"])

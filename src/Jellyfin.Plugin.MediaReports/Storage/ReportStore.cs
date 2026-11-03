@@ -491,7 +491,8 @@ public sealed class ReportStore
     }
 
     /// <summary>
-    /// Gets a reporter's own reports, newest first, with their issue's status and when it last changed.
+    /// Gets a reporter's own reports, newest first, with their issue's status, when it last
+    /// changed and when it closed. Reports the reporter removed from their list are included.
     /// </summary>
     /// <param name="userId">The reporter.</param>
     /// <returns>The reports.</returns>
@@ -501,14 +502,68 @@ public sealed class ReportStore
         return Rows(
             connection,
             """
-            SELECT r.*, i.status AS issue_status,
+            SELECT r.*, i.status AS issue_status, i.closed_at AS issue_closed_at,
                 (SELECT MAX(e.at) FROM event e WHERE e.issue_id = r.issue_id AND e.kind = 'status changed') AS status_changed_at
             FROM report r JOIN issue i ON i.id = r.issue_id
             WHERE r.reporter_user_id = $user
             ORDER BY r.created_at DESC, r.id DESC
             """,
-            r => new ReporterReport(ReadReport(r), Enum.Parse<IssueStatus>(r.GetString(r.GetOrdinal("issue_status"))), ParseTime(Text(r, "status_changed_at"))),
+            r => new ReporterReport(
+                ReadReport(r),
+                Enum.Parse<IssueStatus>(r.GetString(r.GetOrdinal("issue_status"))),
+                ParseTime(Text(r, "status_changed_at")),
+                ParseTime(Text(r, "issue_closed_at"))),
             ("$user", Id(userId)));
+    }
+
+    /// <summary>
+    /// Removes one of a reporter's reports from their list once its issue is closed. Only the
+    /// report's hidden time changes; nothing is logged.
+    /// </summary>
+    /// <param name="reportId">The report.</param>
+    /// <param name="userId">The caller.</param>
+    /// <returns>What happened.</returns>
+    public Hiding HideFromReporter(long reportId, Guid userId)
+    {
+        using var connection = _db.OpenConnection();
+        var found = Rows(
+            connection,
+            "SELECT i.closed_at FROM report r JOIN issue i ON i.id = r.issue_id WHERE r.id = $id AND r.reporter_user_id = $user",
+            r => r.IsDBNull(0) ? null : r.GetString(0),
+            ("$id", reportId),
+            ("$user", Id(userId)));
+        if (found.Count == 0)
+        {
+            return Hiding.NotFound;
+        }
+
+        if (found[0] is null)
+        {
+            return Hiding.NotClosed;
+        }
+
+        Execute(connection, "UPDATE report SET reporter_hidden_at = $now WHERE id = $id", ("$now", Now()), ("$id", reportId));
+        return Hiding.Hidden;
+    }
+
+    /// <summary>
+    /// Removes every one of a reporter's reports on a closed issue from their list.
+    /// </summary>
+    /// <param name="userId">The reporter.</param>
+    /// <returns>How many reports were removed from the list.</returns>
+    public int HideClosedFromReporter(Guid userId)
+    {
+        var now = Now();
+        var hidden = GetReporterReports(userId).Where(r => r.ClosedAt is not null && !r.Hidden).Select(r => r.Report.Id).ToList();
+        using var connection = _db.OpenConnection();
+        using var transaction = Transaction.Begin(connection, immediate: true);
+        foreach (var id in hidden)
+        {
+            Execute(connection, "UPDATE report SET reporter_hidden_at = $now WHERE id = $id", ("$now", now), ("$id", id));
+        }
+
+        transaction.Commit();
+        return hidden.Count;
     }
 
     /// <summary>
@@ -697,6 +752,7 @@ public sealed class ReportStore
         Client = Text(r, "client"),
         Device = Text(r, "device"),
         ReporterSeenAt = ParseTime(Text(r, "reporter_seen_at")),
+        ReporterHiddenAt = ParseTime(Text(r, "reporter_hidden_at")),
     };
 
     private static StoredEvent ReadEvent(SqliteDataReader r) => new()

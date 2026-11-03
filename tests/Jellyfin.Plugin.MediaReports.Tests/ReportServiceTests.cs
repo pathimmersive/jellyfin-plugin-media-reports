@@ -351,6 +351,126 @@ public sealed class ReportServiceTests : IDisposable
         Assert.NotNull(_store.GetReport(filed.Id));
     }
 
+    [Fact]
+    public void Mine_GivesAClosedReportItsExpiry_FromTheRetentionPeriod_AndNoneWhileOpenOrWhenPurgingIsOff()
+    {
+        var open = Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "audio", null)));
+        var closed = Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)));
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        _store.SetStatus(closed.IssueId, IssueStatus.Fixed, _bob.Id);
+        var closedAt = _clock.GetUtcNow();
+
+        var row = Ok(_service.Mine(_alice.Id)).Reports.Single(r => r.Id == closed.Id);
+        Assert.Equal((closedAt.AddDays(365), "Expires in 12 months"), (row.ExpiresAt, row.ExpiresLabel));
+        Assert.Equal((true, false), (row.CanHide, row.CanWithdraw));
+        var openRow = Ok(_service.Mine(_alice.Id)).Reports.Single(r => r.Id == open.Id);
+        Assert.Equal((null, false, true), (openRow.ExpiresAt, openRow.CanHide, openRow.CanWithdraw));
+
+        _config.ReportRetentionDays = 30;
+        Assert.Equal("Expires in 30 days", Ok(_service.Mine(_alice.Id)).Reports.Single(r => r.Id == closed.Id).ExpiresLabel);
+
+        _config.ReportRetentionDays = 0;
+        row = Ok(_service.Mine(_alice.Id)).Reports.Single(r => r.Id == closed.Id);
+        Assert.Null(row.ExpiresAt);
+        Assert.Null(row.ExpiresLabel);
+    }
+
+    [Theory]
+    [InlineData(400, "Expires in 13 months")]
+    [InlineData(60, "Expires in 2 months")]
+    [InlineData(59.5, "Expires in 60 days")]
+    [InlineData(1.5, "Expires in 2 days")]
+    [InlineData(1, "Expires in 1 day")]
+    [InlineData(0.5, "Expires today")]
+    [InlineData(-1, "Expires today")]
+    public void ExpiryLabel_CountsMonthsFromSixtyDays_DaysBelow_AndTodayUnderOneDay(double days, string label)
+    {
+        var now = new DateTimeOffset(2026, 11, 3, 12, 0, 0, TimeSpan.Zero);
+        Assert.Equal(label, ReporterText.ExpiryLabel(now.AddDays(days), now));
+    }
+
+    [Fact]
+    public void Hide_RemovesAClosedReportFromTheCallersList_Only()
+    {
+        var alices = Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)));
+        var bobs = Ok(_service.File(_bob.Id, null, new FileReportRequest(MovieId, "stutter", null)));
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        _store.SetStatus(alices.IssueId, IssueStatus.Fixed, _bob.Id);
+        Assert.Equal(1, Ok(_service.Mine(_alice.Id)).Unread);
+        var events = _store.GetIssueEvents(alices.IssueId).Count;
+
+        Ok(_service.Hide(_alice.Id, alices.Id));
+
+        var mine = Ok(_service.Mine(_alice.Id));
+        Assert.Equal((0, 0), (mine.Reports.Count, mine.Unread));
+        Assert.Equal([bobs.Id], Ok(_service.Mine(_bob.Id)).Reports.Select(r => r.Id));
+        Assert.Equal(IssueStatus.Fixed, _store.GetIssue(alices.IssueId)!.Status);
+        Assert.Equal(events, _store.GetIssueEvents(alices.IssueId).Count);
+    }
+
+    [Fact]
+    public void Hide_RefusesAnOpenReport_AndAnotherUsersReport()
+    {
+        var open = Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)));
+        var bobs = Ok(_service.File(_bob.Id, null, new FileReportRequest(MovieId, "audio", null)));
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        _store.SetStatus(bobs.IssueId, IssueStatus.Fixed, _alice.Id);
+
+        AssertRefused(_service.Hide(_alice.Id, open.Id), Outcome.Conflict, "not-closed");
+        AssertRefused(_service.Hide(_alice.Id, bobs.Id), Outcome.NotFound, "report-not-found");
+        AssertRefused(_service.Hide(_alice.Id, 9999), Outcome.NotFound, "report-not-found");
+
+        Assert.Single(Ok(_service.Mine(_alice.Id)).Reports);
+        Assert.Single(Ok(_service.Mine(_bob.Id)).Reports);
+    }
+
+    [Fact]
+    public void HideClosed_RemovesEveryClosedReport_AndKeepsTheOpenOnes()
+    {
+        var fixedOne = Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)));
+        var wontFix = Ok(_service.File(_alice.Id, null, new FileReportRequest(EpisodeId, "audio", null)));
+        var open = Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "audio", null)));
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        _store.SetStatus(fixedOne.IssueId, IssueStatus.Fixed, _bob.Id);
+        _store.SetStatus(wontFix.IssueId, IssueStatus.WontFix, _bob.Id);
+
+        Assert.Equal(2, Ok(_service.HideClosed(_alice.Id)).Hidden);
+        Assert.Equal([open.Id], Ok(_service.Mine(_alice.Id)).Reports.Select(r => r.Id));
+        Assert.Equal(0, Ok(_service.HideClosed(_alice.Id)).Hidden);
+    }
+
+    [Fact]
+    public void AHiddenReport_ComesBackUnread_WhenItsIssueIsReopened()
+    {
+        var filed = Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)));
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        _store.SetStatus(filed.IssueId, IssueStatus.Fixed, _bob.Id);
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        Ok(_service.MineDetail(_alice.Id, filed.Id));
+        Ok(_service.Hide(_alice.Id, filed.Id));
+        Assert.Empty(Ok(_service.Mine(_alice.Id)).Reports);
+
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        _store.SetStatus(filed.IssueId, IssueStatus.Investigating, _bob.Id);
+
+        var mine = Ok(_service.Mine(_alice.Id));
+        Assert.Equal((1, filed.Id, true), (mine.Unread, mine.Reports[0].Id, mine.Reports[0].Unread));
+        AssertRefused(_service.Hide(_alice.Id, filed.Id), Outcome.Conflict, "not-closed");
+    }
+
+    [Fact]
+    public void ReportingOff_StillLetsTheCallerClearTheirList()
+    {
+        var filed = Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)));
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        _store.SetStatus(filed.IssueId, IssueStatus.Fixed, _bob.Id);
+        _config.ReportingEnabled = false;
+
+        Ok(_service.Hide(_alice.Id, filed.Id));
+        Assert.Equal(0, Ok(_service.HideClosed(_alice.Id)).Hidden);
+        Assert.Empty(Ok(_service.Mine(_alice.Id)).Reports);
+    }
+
     private static T Ok<T>(ServiceResult<T> result)
     {
         Assert.True(result.Outcome == Outcome.Ok, $"{result.Outcome} {result.Code}");

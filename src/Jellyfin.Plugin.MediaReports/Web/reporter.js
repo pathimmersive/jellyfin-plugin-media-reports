@@ -277,7 +277,8 @@
         + '.mediaReportsDialog :focus-visible{outline:2px solid #00a4dc;outline-offset:2px;}'
         // My Reports: rows with an unread dot and a status pill, the detail, and Withdraw.
         + '.mediaReportsList{list-style:none;margin:16px 0 0;padding:0;}'
-        + '.mediaReportsRow{display:flex;align-items:center;box-sizing:border-box;width:100%;min-height:64px;margin:0 0 8px;padding:12px 16px;'
+        + '.mediaReportsItem{display:flex;flex-wrap:wrap;align-items:center;margin:0 0 8px;border-radius:4px;background:rgba(255,255,255,.05);}'
+        + '.mediaReportsRow{display:flex;flex:1;align-items:center;box-sizing:border-box;width:100%;min-width:0;min-height:64px;margin:0;padding:12px 16px;'
         + 'background:rgba(255,255,255,.05);border:0;border-radius:4px;color:inherit;font:inherit;text-align:left;cursor:pointer;}'
         + '.mediaReportsRow:hover{background:rgba(255,255,255,.1);}'
         + '.mediaReportsUnreadDot{flex:none;width:8px;height:8px;margin-right:12px;border-radius:50%;background:#00a4dc;}'
@@ -293,7 +294,15 @@
         + '.mediaReportsPill.mr-closed{background:rgba(255,255,255,.1);color:rgba(255,255,255,.75);}'
         + '.mediaReportsEmpty{margin:24px 0 0;font-size:1.1em;font-weight:500;}'
         + '.mediaReportsEmptyHint{margin:8px 0 0;color:rgba(255,255,255,.7);}'
-        + '.mediaReportsFootnote{margin:16px 0 0;font-size:.85em;color:rgba(255,255,255,.6);}'
+        + '.mediaReportsItem .mediaReportsRow{width:auto;background:transparent;}'
+        + '.mediaReportsItem:hover{background:rgba(255,255,255,.1);}'
+        + '.mediaReportsRowAction{flex:none;display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;margin-right:10px;'
+        + 'background:none;border:0;border-radius:50%;color:rgba(255,255,255,.75);cursor:pointer;}'
+        + '.mediaReportsRowAction:hover{background:rgba(255,255,255,.12);color:#fff;}'
+        + '.mediaReportsItem>.mediaReportsConfirm{flex-basis:100%;box-sizing:border-box;margin:0;border-radius:0 0 4px 4px;}'
+        + '.mediaReportsClearArea{margin-top:16px;}'
+        + '.mediaReportsClear{min-height:44px;padding:0 20px;background:transparent;border:1px solid rgba(255,255,255,.3);border-radius:4px;'
+        + 'color:inherit;font:inherit;cursor:pointer;}'
         + '.mediaReportsBack{display:inline-flex;align-items:center;justify-content:center;margin:0 8px 0 -6px;padding:4px;background:none;border:0;'
         + 'border-radius:50%;color:inherit;cursor:pointer;}'
         + '.mediaReportsBack:hover{background:rgba(255,255,255,.1);}'
@@ -333,9 +342,9 @@
         if (!api) {
             return Promise.reject({ status: 0 });
         }
-        // A DELETE answers 204 with no body to parse.
+        // A DELETE and a Hide answer 204 with no body to parse.
         var request = { type: method, url: api.getUrl(path, query || {}) };
-        if (method !== 'DELETE') {
+        if (method !== 'DELETE' && !/\/Hide$/.test(path)) {
             request.dataType = 'json';
         }
         if (body) {
@@ -962,7 +971,7 @@
         });
     }
 
-    function renderMine(state, focusId) {
+    function renderMine(state, focusId, message) {
         state.onBack = null;
         var headerBack = state.headingRow.querySelector('.mediaReportsBack');
         if (headerBack) {
@@ -970,6 +979,11 @@
         }
         var body = state.body;
         body.innerHTML = '';
+        if (message) {
+            var problem = el('p', 'mediaReportsError', message);
+            problem.setAttribute('role', 'alert');
+            body.appendChild(problem);
+        }
         var reports = state.mine.Reports || [];
         if (!reports.length) {
             body.appendChild(el('p', 'mediaReportsEmpty', "You haven't reported anything."));
@@ -977,8 +991,8 @@
         }
         var list = el('ul', 'mediaReportsList');
         var focus = null;
-        reports.forEach(function (report) {
-            var li = el('li');
+        reports.forEach(function (report, index) {
+            var li = el('li', 'mediaReportsItem');
             var row = el('button', 'mediaReportsRow' + (report.Unread ? ' mr-unread' : ''));
             row.type = 'button';
             if (report.Unread) {
@@ -988,10 +1002,12 @@
             }
             var text = el('span', 'mediaReportsRowText');
             text.appendChild(el('span', 'mediaReportsRowTitle', report.Title));
-            text.appendChild(el('span', 'mediaReportsRowMeta', report.ReasonLabel + ' · ' + shortDay(report.CreatedAt)));
+            var meta = report.ReasonLabel + ' · ' + shortDay(report.CreatedAt) + (report.ExpiresLabel ? ' · ' + report.ExpiresLabel : '');
+            text.appendChild(el('span', 'mediaReportsRowMeta', meta));
             row.appendChild(text);
             row.appendChild(pill(report.Status, report.StatusLabel));
-            row.setAttribute('aria-label', report.Title + ', ' + report.ReasonLabel + ', ' + report.StatusLabel + (report.Unread ? ', updated' : ''));
+            row.setAttribute('aria-label', report.Title + ', ' + report.ReasonLabel + ', ' + report.StatusLabel
+                + (report.Unread ? ', updated' : '') + (report.ExpiresLabel ? ', ' + report.ExpiresLabel.toLowerCase() : ''));
             row.addEventListener('click', function () {
                 openReport(state, report);
             });
@@ -999,11 +1015,90 @@
                 focus = row;
             }
             li.appendChild(row);
+
+            // One action per row, with a pointer only: the TV only reads.
+            var next = reports[index + 1] || reports[index - 1];
+            if (!state.tv && report.CanHide) {
+                li.appendChild(rowAction('close', 'mediaReportsHide', 'Remove from list', function () {
+                    hideReport(state, report, next);
+                }));
+            } else if (!state.tv && report.CanWithdraw) {
+                var withdraw = rowAction('undo', 'mediaReportsRowWithdraw', 'Withdraw', null);
+                withdraw.addEventListener('click', function () {
+                    confirmWithdraw(state, report, li, withdraw, next);
+                });
+                li.appendChild(withdraw);
+            }
             list.appendChild(li);
         });
         body.appendChild(list);
-        body.appendChild(el('p', 'mediaReportsFootnote', 'Closed reports are removed a year after they close.'));
+
+        var closed = reports.filter(function (r) {
+            return r.CanHide;
+        }).length;
+        if (closed && !state.tv) {
+            var footer = el('div', 'mediaReportsClearArea');
+            var clear = el('button', 'mediaReportsClear', 'Clear all closed');
+            clear.type = 'button';
+            clear.addEventListener('click', function () {
+                confirmClear(state, footer, clear, closed);
+            });
+            footer.appendChild(clear);
+            body.appendChild(footer);
+        }
         (focus || focusables(list)[0] || focusables(state.dialog)[0] || state.dialog).focus();
+    }
+
+    function rowAction(icon, className, label, action) {
+        var button = el('button', 'mediaReportsRowAction ' + className);
+        button.type = 'button';
+        button.title = label;
+        button.setAttribute('aria-label', label);
+        var glyph = el('span', 'material-icons ' + icon);
+        glyph.setAttribute('aria-hidden', 'true');
+        button.appendChild(glyph);
+        if (action) {
+            button.addEventListener('click', action);
+        }
+        return button;
+    }
+
+    // Removing only tidies the user's own list, so it needs no confirmation.
+    function hideReport(state, report, next) {
+        call('POST', 'MediaReports/Report/Mine/' + report.Id + '/Hide').then(function () {
+            if (open === state) {
+                loadMine(state, next ? next.Id : null);
+            }
+        }, function () {
+            if (open === state) {
+                renderMine(state, report.Id, "Couldn't reach the server, so the report is still in your list. Try again.");
+            }
+        });
+    }
+
+    function confirmClear(state, area, clear, closed) {
+        var text = closed === 1 ? 'Remove the closed report from your list?' : 'Remove ' + closed + ' closed reports from your list?';
+        confirmIn(area, clear, {
+            text: text,
+            keep: 'Cancel',
+            keepClass: 'mediaReportsClearCancel',
+            go: 'Remove',
+            goClass: 'mediaReportsClearConfirm',
+            run: function () {
+                return call('POST', 'MediaReports/Report/Mine/HideClosed');
+            },
+            done: function () {
+                if (open === state) {
+                    loadMine(state, null);
+                }
+            },
+            failure: function () {
+                return "Couldn't reach the server, so nothing was removed. Try again.";
+            },
+            alive: function () {
+                return open === state;
+            }
+        });
     }
 
     function openReport(state, report) {
@@ -1080,7 +1175,7 @@
             var withdraw = el('button', 'mediaReportsWithdraw', 'Withdraw report');
             withdraw.type = 'button';
             withdraw.addEventListener('click', function () {
-                confirmWithdraw(state, detail, actions, withdraw);
+                confirmWithdraw(state, detail, actions, withdraw, null);
             });
             actions.appendChild(withdraw);
             view.appendChild(actions);
@@ -1089,47 +1184,69 @@
         (focusables(view)[0] || state.dialog).focus();
     }
 
-    function confirmWithdraw(state, detail, actions, withdraw) {
-        withdraw.style.display = 'none';
+    function confirmWithdraw(state, report, area, withdraw, next) {
+        confirmIn(area, withdraw, {
+            text: 'Withdraw this report?',
+            keep: 'Keep it',
+            keepClass: 'mediaReportsKeep',
+            go: 'Withdraw',
+            goClass: 'mediaReportsWithdrawConfirm',
+            run: function () {
+                return call('DELETE', 'MediaReports/Report/Mine/' + report.Id);
+            },
+            done: function () {
+                if (open === state) {
+                    loadMine(state, next ? next.Id : null);
+                }
+            },
+            failure: function (code) {
+                return code === 'not-new'
+                    ? "It's already being looked at, so it can't be withdrawn."
+                    : "Couldn't reach the server, so the report wasn't withdrawn. Try again.";
+            },
+            alive: function () {
+                return open === state;
+            }
+        });
+    }
+
+    // Asks in place of the button that asked: the button hides, the question takes its
+    // place, and Keep puts the button back.
+    function confirmIn(area, asker, ask) {
+        asker.style.display = 'none';
         var box = el('div', 'mediaReportsConfirm');
         box.setAttribute('role', 'alertdialog');
-        box.setAttribute('aria-label', 'Withdraw this report?');
-        box.appendChild(el('p', 'mediaReportsConfirmText', 'Withdraw this report?'));
+        box.setAttribute('aria-label', ask.text);
+        box.appendChild(el('p', 'mediaReportsConfirmText', ask.text));
         var error = el('p', 'mediaReportsError');
         error.style.display = 'none';
         error.setAttribute('role', 'alert');
         box.appendChild(error);
         var buttons = el('div', 'mediaReportsActions');
-        var keep = el('button', 'mediaReportsCancel mediaReportsKeep', 'Keep it');
+        var keep = el('button', 'mediaReportsCancel ' + ask.keepClass, ask.keep);
         keep.type = 'button';
-        var confirm = el('button', 'mediaReportsDanger mediaReportsWithdrawConfirm', 'Withdraw');
-        confirm.type = 'button';
+        var go = el('button', 'mediaReportsDanger ' + ask.goClass, ask.go);
+        go.type = 'button';
         buttons.appendChild(keep);
-        buttons.appendChild(confirm);
+        buttons.appendChild(go);
         box.appendChild(buttons);
-        actions.appendChild(box);
+        area.appendChild(box);
         keep.addEventListener('click', function () {
-            actions.removeChild(box);
-            withdraw.style.display = '';
-            withdraw.focus();
+            area.removeChild(box);
+            asker.style.display = '';
+            asker.focus();
         });
-        confirm.addEventListener('click', function () {
-            confirm.disabled = true;
+        go.addEventListener('click', function () {
+            go.disabled = true;
             keep.disabled = true;
-            call('DELETE', 'MediaReports/Report/Mine/' + detail.Id).then(function () {
-                if (open === state) {
-                    loadMine(state, null);
-                }
-            }, function (failure) {
+            ask.run().then(ask.done, function (failure) {
                 errorCode(failure).then(function (code) {
-                    if (open !== state) {
+                    if (!ask.alive()) {
                         return;
                     }
-                    confirm.disabled = false;
+                    go.disabled = false;
                     keep.disabled = false;
-                    error.textContent = code === 'not-new'
-                        ? "It's already being looked at, so it can't be withdrawn."
-                        : "Couldn't reach the server, so the report wasn't withdrawn. Try again.";
+                    error.textContent = ask.failure(code);
                     error.style.display = '';
                 });
             });

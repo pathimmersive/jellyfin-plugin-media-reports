@@ -158,6 +158,8 @@ expect 401 "" "" "" GET "/MediaReports/Report/Context?itemId=$item_id"
 expect 401 "" "" "" GET /MediaReports/Report/Mine
 expect 401 "" "" "" GET /MediaReports/Report/Mine/1
 expect 401 "" "" "" DELETE /MediaReports/Report/Mine/1
+expect 401 "" "" "" POST /MediaReports/Report/Mine/1/Hide
+expect 401 "" "" "" POST /MediaReports/Report/Mine/HideClosed
 expect 404 item-not-found "Alice Phone" "$alice_phone" GET "/MediaReports/Report/Context?itemId=$(py -c 'import uuid;print(uuid.uuid4())')"
 
 echo "== context from alice's phone names the TV playback"
@@ -193,8 +195,9 @@ set_config() {
 import json, sys
 d = json.load(open(sys.argv[1]))
 d['ReportingEnabled'] = sys.argv[2] == 'on'
+d['ReportRetentionDays'] = int(sys.argv[3])
 d['Reasons'] = [dict(r, Retired=(r['Code'] == 'metadata')) for r in d['Reasons']]
-print(json.dumps(d))" "$work/results/config.json" "$1")"
+print(json.dumps(d))" "$work/results/config.json" "$1" "${2:-365}")"
   ok "admin box" "$admin" POST "/Plugins/$plugin_id/Configuration" "$cfg" >/dev/null
 }
 set_config on
@@ -357,6 +360,7 @@ before, after, detail, read, bob = (load(n) for n in ("mine-before.json", "mine-
 assert [x["ReasonLabel"] for x in before["Reports"]] == ["Audio problem", "Stutter or jitter"] and before["Unread"] == 0, before
 assert len(after["Reports"]) == 1 and after["Unread"] == 1 and after["Reports"][0]["Unread"], after
 assert after["Reports"][0]["StatusLabel"] == "Duplicate", after
+assert after["Reports"][0]["ExpiresLabel"] == "Expires in 12 months" and after["Reports"][0]["CanHide"] is True, after
 assert [h["Label"] for h in detail["History"]] == ["Reported", "Being looked at", "Fixed", "Duplicate"], detail["History"]
 assert detail["Note"] == "keeps jumping back" and detail.get("Device") == "Living Room TV" and detail["CanWithdraw"] is False, detail
 assert read["Unread"] == 0 and not read["Reports"][0]["Unread"], read
@@ -370,6 +374,51 @@ for name in ("mine-before.json", "mine-after.json", "mine-detail.json", "mine-re
     for bad in ("secret", "re-encoded", "bob", "/media/", ".mkv", "remoteendpoint", "127.0.0.1", "172."):
         assert bad not in text, (name, bad)
 print(f"my reports: listed, opened, withdrawn; one toast '{n['Text']}' (8000 ms); nothing private in any answer")
+PY
+
+echo "== alice removes closed reports from her list; the admin's issue and bob's report stay"
+ok "Alice Phone" "$alice_phone" POST /MediaReports/Report "{\"itemId\":\"$item_id\",\"reasonCode\":\"wont-play\"}" >"$work/results/alice-open.json"
+open_report="$(json "d['Id']" <"$work/results/alice-open.json")"
+expect 409 not-closed "Alice Phone" "$alice_phone" POST "/MediaReports/Report/Mine/$open_report/Hide"
+expect 404 report-not-found "Bob Laptop" "$bob" POST "/MediaReports/Report/Mine/$alice_report/Hide"
+set_config on 0
+ok "Alice Phone" "$alice_phone" GET /MediaReports/Report/Mine >"$work/results/mine-no-expiry.json"
+set_config on 30
+ok "Alice Phone" "$alice_phone" GET /MediaReports/Report/Mine >"$work/results/mine-30-days.json"
+set_config off 365
+expect 204 "" "Alice Phone" "$alice_phone" POST "/MediaReports/Report/Mine/$alice_report/Hide"
+set_config on 365
+ok "Alice Phone" "$alice_phone" GET /MediaReports/Report/Mine >"$work/results/mine-hidden.json"
+ok "Bob Laptop" "$bob" GET /MediaReports/Report/Mine >"$work/results/bob-after-hide.json"
+ok "admin box" "$admin" GET "/MediaReports/Admin/Issues/$issue" >"$work/results/issue-after-hide.json"
+sleep 1
+ok "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$issue" '{"status":"Investigating"}' >/dev/null
+ok "Alice Phone" "$alice_phone" GET /MediaReports/Report/Mine >"$work/results/mine-reopened.json"
+ok "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$issue" '{"status":"Fixed"}' >/dev/null
+ok "Alice Phone" "$alice_phone" POST /MediaReports/Report/Mine/HideClosed >"$work/results/hide-closed.json"
+ok "Alice Phone" "$alice_phone" GET /MediaReports/Report/Mine >"$work/results/mine-cleared.json"
+py - "$work/results" "$alice_report" "$open_report" <<'PY' || fail "removing reports from My Reports is wrong"
+import json, os, sys
+r, closed_id, open_id = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+load = lambda n: json.load(open(os.path.join(r, n)))
+row = lambda d, i: next((x for x in d["Reports"] if x["Id"] == i), None)
+none, thirty = load("mine-no-expiry.json"), load("mine-30-days.json")
+assert row(none, closed_id).get("ExpiresLabel") is None and row(none, closed_id).get("ExpiresAt") is None, none
+assert row(thirty, closed_id)["ExpiresLabel"] == "Expires in 30 days", thirty
+assert row(thirty, open_id).get("ExpiresLabel") is None and row(thirty, open_id)["CanWithdraw"] is True and row(thirty, open_id)["CanHide"] is False, thirty
+hidden = load("mine-hidden.json")
+assert [x["Id"] for x in hidden["Reports"]] == [open_id] and hidden["Unread"] == 0, hidden
+bob = load("bob-after-hide.json")
+assert len(bob["Reports"]) == 1 and bob["Reports"][0]["StatusLabel"] == "Duplicate", bob
+issue = load("issue-after-hide.json")
+assert issue["Status"] == "Duplicate" and len(issue["Reports"]) == 2, issue
+reopened = load("mine-reopened.json")
+back = row(reopened, closed_id)
+assert back and back["Unread"] and back["StatusLabel"] == "Being looked at" and reopened["Unread"] == 1, reopened
+assert load("hide-closed.json")["Hidden"] == 1, load("hide-closed.json")
+assert [x["Id"] for x in load("mine-cleared.json")["Reports"]] == [open_id], load("mine-cleared.json")
+print("my reports: expiry follows the period (none at 0, 30 days, 12 months); a closed report hides while reporting is off, an open one is refused,")
+print("  it returns unread when reopened, and Clear all closed leaves only the open report; bob's report and the admin's issue are untouched")
 PY
 
 echo "PASS: filing reports on $image"

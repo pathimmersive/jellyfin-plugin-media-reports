@@ -193,6 +193,27 @@ public sealed record MyReportRow
 
     /// <summary>Gets a value indicating whether the status changed since the reporter last opened it.</summary>
     public bool Unread { get; init; }
+
+    /// <summary>Gets when a closed report is purged, or null while it is open or purging is off.</summary>
+    public DateTimeOffset? ExpiresAt { get; init; }
+
+    /// <summary>Gets how the expiry reads, such as "Expires in 12 months", or null without one.</summary>
+    public string? ExpiresLabel { get; init; }
+
+    /// <summary>Gets a value indicating whether the report is closed, so the caller can remove it from their list.</summary>
+    public bool CanHide { get; init; }
+
+    /// <summary>Gets a value indicating whether the report is New, so the caller can still withdraw it.</summary>
+    public bool CanWithdraw { get; init; }
+}
+
+/// <summary>
+/// How many reports were removed from the caller's list.
+/// </summary>
+public sealed record HiddenReports
+{
+    /// <summary>Gets the count.</summary>
+    public int Hidden { get; init; }
 }
 
 /// <summary>

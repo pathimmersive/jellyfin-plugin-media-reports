@@ -2,7 +2,8 @@
 # Starts a real Jellyfin 12 server in Docker with the plugin, a generated movie and a short
 # series, then drives Jellyfin Web in a headless browser (Playwright for Python) at desktop
 # width, phone width and in the TV layout, as one user each: where the Report button
-# appears, and the report dialog it opens, from sending to what the server stored.
+# appears, and the report dialog it opens, from sending to what the server stored. Then
+# moves the reports on as the admin and follows them in My Reports in each layout.
 #
 # Usage: scripts/smoke-web.sh [--without-plugin] [--keep]
 #   --without-plugin  start the server with no plugin; the script must fail
@@ -143,6 +144,7 @@ py - "$work/results/server.json" <<'PY'
 import json
 import os
 import sys
+import time
 import urllib.request
 
 from playwright.sync_api import sync_playwright
@@ -157,17 +159,34 @@ WAIT_MS = 15000
 failures = []
 
 
-def admin(path, body=None):
+def admin(path, body=None, method=None):
     auth = 'MediaBrowser Client="media-reports-smoke", Device="smoke", DeviceId="media-reports-web", Version="1.0.0", Token="%s"' % cfg["admin_token"]
     headers = {"Authorization": auth}
     data = None
     if body is not None:
         data = json.dumps(body).encode()
         headers["Content-Type"] = "application/json"
-    request = urllib.request.Request(API + path, data=data, method="POST" if body is not None else "GET", headers=headers)
+    request = urllib.request.Request(API + path, data=data, method=method or ("POST" if body is not None else "GET"), headers=headers)
     with urllib.request.urlopen(request) as response:
         text = response.read()
     return json.loads(text) if text else None
+
+
+def set_avatar(user_id):
+    # A plain blue square, the colour that hid the dot on a phone.
+    import base64
+    import struct
+    import zlib
+
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+    side = 64
+    rows = b"".join(b"\x00" + bytes((0, 164, 220)) * side for _ in range(side))
+    image = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", side, side, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
+    auth = 'MediaBrowser Client="media-reports-smoke", Device="smoke", DeviceId="media-reports-web", Version="1.0.0", Token="%s"' % cfg["admin_token"]
+    request = urllib.request.Request("%s/Users/%s/Images/Primary" % (API, user_id), data=base64.b64encode(image), method="POST",
+                                     headers={"Authorization": auth, "Content-Type": "image/png"})
+    urllib.request.urlopen(request).read()
 
 
 def configure(**changes):
@@ -538,6 +557,333 @@ def run(p, layout, user, context_args):
     b.close()
 
 
+MINE = ".mediaReportsDialog.mediaReportsMine"
+SECRET = "Secret admin note: re-encoded from the source."
+FOOTNOTE = "Closed reports are removed a year after they close."
+PILLS = {
+    "New": ("rgba(0, 164, 220, 0.18)", "rgb(79, 195, 236)"),
+    "Being looked at": ("rgba(242, 176, 30, 0.18)", "rgb(245, 196, 81)"),
+    "Fixed": ("rgba(102, 187, 106, 0.18)", "rgb(143, 209, 147)"),
+    "Won't fix": ("rgba(255, 255, 255, 0.1)", "rgba(255, 255, 255, 0.75)"),
+}
+
+# My Reports as drawn: the panel, its rows or its detail, and the confirmation.
+MINE_STATE = """() => {
+  const d = document.querySelector('.mediaReportsDialog.mediaReportsMine');
+  if (!d) return null;
+  const r = d.getBoundingClientRect();
+  const text = (s, root) => { const e = (root || d).querySelector(s); return e && e.offsetParent !== null ? e.textContent.trim() : null; };
+  const pill = p => p ? { text: p.textContent.trim(), bg: getComputedStyle(p).backgroundColor, color: getComputedStyle(p).color } : null;
+  return {
+    cls: d.className, x: r.left, y: r.top, w: r.width, h: r.height, vw: innerWidth, vh: innerHeight,
+    heading: text('.mediaReportsHeading'),
+    rows: [...d.querySelectorAll('.mediaReportsRow')].map(row => ({
+      title: text('.mediaReportsRowTitle', row), meta: text('.mediaReportsRowMeta', row),
+      pill: pill(row.querySelector('.mediaReportsPill')), unread: row.classList.contains('mr-unread'),
+      dot: !!row.querySelector('.mediaReportsUnreadDot'), tag: row.tagName
+    })),
+    footnote: text('.mediaReportsFootnote'), empty: text('.mediaReportsEmpty'), emptyHint: text('.mediaReportsEmptyHint'),
+    detail: d.querySelector('.mediaReportsDetail') ? {
+      title: text('.mediaReportsDetail .mediaReportsRowTitle'), pill: pill(d.querySelector('.mediaReportsDetail .mediaReportsPill')),
+      facts: [...d.querySelectorAll('.mediaReportsFacts dd')].map(e => e.textContent.trim()),
+      history: [...d.querySelectorAll('.mediaReportsHistory li .mediaReportsStep')].map(e => e.textContent.trim()),
+      back: d.querySelector('.mediaReportsBack') ? (d.querySelector('.mediaReportsBack').closest('.mediaReportsHeadingRow') && d.querySelector('.mediaReportsBack').nextElementSibling && d.querySelector('.mediaReportsBack').nextElementSibling.classList.contains('mediaReportsHeading') ? 'header' : 'elsewhere') : null,
+      withdraw: !!d.querySelector('.mediaReportsWithdraw') && d.querySelector('.mediaReportsWithdraw').offsetParent !== null
+    } : null,
+    confirm: text('.mediaReportsConfirm .mediaReportsConfirmText'),
+    all: d.textContent, focusInside: d.contains(document.activeElement),
+    focus: document.activeElement ? (document.activeElement.textContent || '').trim() : ''
+  };
+}"""
+
+# Where the entry, its count and the dot are.
+ENTRY_STATE = """() => {
+  const visible = e => !!e && e.offsetParent !== null;
+  // Nothing in the user button paints over the dot, and no clipping ancestor (a round
+  // button among them) cuts any of it off.
+  const onTop = e => {
+    if (!visible(e)) return false;
+    const r = e.getBoundingClientRect();
+    e.style.pointerEvents = 'auto';
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    e.style.pointerEvents = 'none';
+    if (hit !== e) return false;
+    for (let n = e.parentElement; n && n !== document.body; n = n.parentElement) {
+      const c = getComputedStyle(n);
+      if (c.overflow === 'visible') continue;
+      const a = n.getBoundingClientRect();
+      if (c.borderRadius === '50%' && Math.abs(a.width - a.height) < 1) {
+        const dx = r.left + r.width / 2 - (a.left + a.width / 2), dy = r.top + r.height / 2 - (a.top + a.height / 2);
+        if (Math.sqrt(dx * dx + dy * dy) + r.width / 2 > a.width / 2 + 0.5) return false;
+      } else if (r.left < a.left || r.top < a.top || r.right > a.right || r.bottom > a.bottom) {
+        return false;
+      }
+    }
+    return true;
+  };
+  // The count shares the label's line.
+  const oneLine = r => {
+    const label = r.querySelector('.listItemBodyText'), count = r.querySelector('.mediaReportsSettingsRowCount');
+    if (!label || !count) return false;
+    const a = label.firstChild.nodeType === 3 ? (() => { const g = document.createRange(); g.selectNodeContents(label.firstChild); return g.getBoundingClientRect(); })() : label.getBoundingClientRect();
+    const b = count.getBoundingClientRect();
+    return b.top < a.bottom && b.bottom > a.top;
+  };
+  const item = document.querySelector('.mediaReportsMenuItem');
+  const row = document.querySelector('.page:not(.hide) .mediaReportsSettingsRow');
+  const user = document.querySelector('button[aria-controls=app-user-menu]') || document.querySelector('.headerUserButton');
+  const dot = user && user.querySelector('.mediaReportsDot');
+  return {
+    item: item ? { after: item.previousElementSibling ? item.previousElementSibling.getAttribute('href') : null,
+                   text: item.textContent.trim(), count: item.querySelector('.mediaReportsMenuItemCount') ? item.querySelector('.mediaReportsMenuItemCount').textContent.trim() : null,
+                   role: item.getAttribute('role'), visible: visible(item) } : null,
+    row: row ? { after: row.previousElementSibling ? row.previousElementSibling.className : null, text: row.textContent.trim(),
+                 count: row.querySelector('.mediaReportsSettingsRowCount') ? row.querySelector('.mediaReportsSettingsRowCount').textContent.trim() : null,
+                 oneLine: oneLine(row), pill: row.querySelector('.mediaReportsSettingsRowCount') ? getComputedStyle(row.querySelector('.mediaReportsSettingsRowCount')).backgroundColor : null } : null,
+    dot: visible(dot), dotOnTop: onTop(dot), dotRinged: !!dot && getComputedStyle(dot).boxShadow !== 'none'
+  };
+}"""
+
+
+def mine_state(page):
+    return page.evaluate(MINE_STATE)
+
+
+def entry(page):
+    return page.evaluate(ENTRY_STATE)
+
+
+def wait_mine(page, open_=True):
+    page.wait_for_function("open => (document.querySelector('.mediaReportsDialog.mediaReportsMine') !== null) === open", arg=open_, timeout=WAIT_MS)
+    page.wait_for_timeout(400)
+
+
+def expected_rows(user):
+    # Newest first, as the Report dialog filed them in run(): player, series, episode, movie.
+    reports = sorted((r for r in admin("/MediaReports/Admin/Export")["reports"] if r["reporterName"] == user), key=lambda r: r["id"], reverse=True)
+    def title(r):
+        if r["itemType"] == "Episode":
+            return "%s S%02dE%02d" % (r["seriesName"], r["seasonNumber"], r["episodeNumber"])
+        return r["itemName"]
+    labels = {"poor-quality": "Won't fix", "other": "New", "subtitles": "Being looked at", "stutter": "Fixed"}
+    return [(title(r), labels[r["reasonCode"]], r["reasonCode"]) for r in reports]
+
+
+def check_dot(e, where):
+    check(e["dotOnTop"], where + ": the whole dot shows; nothing covers or clips it")
+    check(e["dotRinged"], where + ": the dot has a ring that sets it apart from the avatar")
+
+
+def open_mine_from_menu(page, where):
+    try:
+        page.wait_for_function("() => { const u = document.querySelector('button[aria-controls=app-user-menu]'); return u && u.querySelector('.mediaReportsDot'); }", timeout=WAIT_MS)
+    except Exception:  # noqa: BLE001 - a timeout is the finding
+        pass
+    check(entry(page)["dot"], where + ": the user button carries the unread dot")
+    check_dot(entry(page), where)
+    page.locator("button[aria-controls=app-user-menu]").click()
+    try:
+        page.wait_for_selector(".mediaReportsMenuItem", state="visible", timeout=WAIT_MS)
+        page.wait_for_function("() => { const c = document.querySelector('.mediaReportsMenuItemCount'); return c && c.textContent.trim(); }", timeout=WAIT_MS)
+    except Exception:  # noqa: BLE001 - a timeout is the finding
+        check(False, where + ": My Reports is in the User Menu with its count")
+        return False
+    e = entry(page)["item"]
+    check(e["after"] == "#/mypreferencesmenu", where + ": My Reports sits right after Settings in the User Menu (%s)" % e["after"])
+    check(e["count"] == "3" and e["role"] == "menuitem", where + ": it carries the unread count 3 (%s)" % e["count"])
+    started = time.monotonic()
+    page.locator(".mediaReportsMenuItem").click()
+    try:
+        wait_mine(page)
+    except Exception:  # noqa: BLE001 - a timeout is the finding
+        check(False, where + ": choosing My Reports opens it")
+        return False
+    took = time.monotonic() - started
+    check(took < 1.0, where + ": My Reports opens within a second of the click (%.2fs)" % took)
+    page.wait_for_function("() => document.querySelector('.mediaReportsMine .mediaReportsRow, .mediaReportsMine .mediaReportsEmpty')", timeout=WAIT_MS)
+    try:
+        page.wait_for_function("() => ![...document.querySelectorAll('.MuiMenu-paper')].some(m => getComputedStyle(m).visibility !== 'hidden' && m.offsetParent !== null)", timeout=WAIT_MS)
+    except Exception:  # noqa: BLE001 - a timeout is the finding
+        pass
+    check(page.locator(".MuiMenu-paper").locator("visible=true").count() == 0, where + ": the User Menu closed behind it")
+    page.wait_for_timeout(300)
+    check(page.evaluate("() => !!document.activeElement && !!document.activeElement.closest('.mediaReportsMine')"),
+          where + ": focus is in My Reports once the menu has closed")
+    return True
+
+
+def check_list(state, rows, where):
+    got = [(r["title"], r["pill"]["text"] if r["pill"] else None) for r in state["rows"]]
+    check(got == [(t, s) for t, s, _ in rows], where + ": the reports are listed newest first with their titles and statuses (%s)" % got)
+    for r in state["rows"]:
+        want = PILLS.get(r["pill"]["text"]) if r["pill"] else None
+        check(want is not None and (r["pill"]["bg"], r["pill"]["color"]) == want,
+              where + ": the %s pill has the approved colours (%s on %s)" % (r["pill"] and r["pill"]["text"], r["pill"] and r["pill"]["color"], r["pill"] and r["pill"]["bg"]))
+    check(all(r["meta"] and r["meta"].split(" · ")[0] in REASONS for r in state["rows"]), where + ": each row names its reason and when")
+    check(state["footnote"] == FOOTNOTE, where + ": the list ends with the retention footnote")
+    check(SECRET not in state["all"], where + ": the admin's note is nowhere in My Reports")
+
+
+def open_row(page, title, status, layout):
+    index = [(r["title"], r["pill"]["text"]) for r in mine_state(page)["rows"]].index((title, status))
+    if layout == "tv":
+        page.locator(MINE + " .mediaReportsRow").nth(index).focus()
+        page.keyboard.press("Enter")
+    else:
+        page.locator(MINE + " .mediaReportsRow").nth(index).click()
+    page.wait_for_selector(MINE + " .mediaReportsDetail", timeout=WAIT_MS)
+    page.wait_for_function("() => document.querySelector('.mediaReportsMine .mediaReportsHistory li')", timeout=WAIT_MS)
+    return mine_state(page)["detail"]
+
+
+def back_to_list(page, layout):
+    if layout == "tv":
+        page.keyboard.press("Escape")
+    else:
+        page.locator(MINE + " .mediaReportsBack").click()
+    page.wait_for_selector(MINE + " .mediaReportsRow", timeout=WAIT_MS)
+
+
+def my_reports(p, layout, user, context_args):
+    where = layout + ", My Reports"
+    b = browser(p)
+    page = b.new_context(**context_args).new_page()
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)) if "reporter.js" in (e.stack or "") else None)
+    page.on("console", lambda m: errors.append(m.text) if "[Media Reports]" in m.text else None)
+    sign_in(page, user)
+    rows = expected_rows(user)
+    if layout == "tv":
+        page.evaluate("localStorage.setItem('layout', 'tv')")
+        page.reload()
+        page.wait_for_function("() => document.documentElement.classList.contains('layout-tv')", timeout=WAIT_MS)
+        try:
+            page.wait_for_function("() => { const u = document.querySelector('.headerUserButton'); return u && u.querySelector('.mediaReportsDot'); }", timeout=WAIT_MS)
+        except Exception:  # noqa: BLE001 - a timeout is the finding
+            pass
+        check(entry(page)["dot"], where + ": the user button carries the unread dot")
+        check_dot(entry(page), where)
+        page.goto(API + "/web/#/mypreferencesmenu")
+        try:
+            page.wait_for_selector(".page:not(.hide) .mediaReportsSettingsRow", timeout=WAIT_MS)
+        except Exception:  # noqa: BLE001 - a timeout is the finding
+            check(False, where + ": My Reports is a row in Settings")
+            b.close()
+            return
+        e = entry(page)["row"]
+        check("lnkUserProfile" in (e["after"] or ""), where + ": the row sits right after Profile (%s)" % e["after"])
+        check(e["count"] == "3 updated", where + ': it reads "3 updated" (%s)' % e["count"])
+        check(e["oneLine"], where + ": the count sits on the label's line")
+        check(e["pill"] == "rgb(0, 164, 220)", where + ": the count is a blue pill (%s)" % e["pill"])
+        page.locator(".page:not(.hide) .mediaReportsSettingsRow").focus()
+        page.keyboard.press("Enter")
+        wait_mine(page)
+        page.wait_for_selector(MINE + " .mediaReportsRow", timeout=WAIT_MS)
+    elif not open_mine_from_menu(page, where):
+        b.close()
+        return
+
+    s = mine_state(page)
+    if layout == "desktop":
+        check("mr-desktop" in s["cls"] and abs(s["x"] + s["w"] / 2 - s["vw"] / 2) < 2 and s["w"] == 640, where + ": a centred 640 px panel (%dx%d)" % (s["w"], s["h"]))
+    else:
+        check(("mr-" + layout) in s["cls"] and s["w"] == s["vw"] and s["h"] == s["vh"], where + ": full screen (%dx%d)" % (s["w"], s["h"]))
+    check(s["heading"] == "My Reports", where + ": headed My Reports")
+    check(s["focusInside"], where + ": focus moves into it")
+    check_list(s, rows, where)
+    check([r["unread"] and r["dot"] for r in s["rows"]] == [st != "New" for _, st, _ in rows], where + ": the three changed reports are marked unread")
+
+    by_code = {code: (t, st) for t, st, code in rows}
+    fixed = open_row(page, *by_code["stutter"], layout)
+    check(fixed["facts"][:1] == ["Stutter or jitter"] and (layout == "tv" or NOTE in fixed["facts"]),
+          where + ": a report shows its reason" + ("" if layout == "tv" else " and note") + " (%s)" % fixed["facts"])
+    check(fixed["history"] == ["Reported", "Fixed"], where + ": its history reads Reported, Fixed (%s)" % fixed["history"])
+    check(SECRET not in mine_state(page)["all"], where + ": the admin's note isn't shown")
+    check(not fixed["withdraw"], where + ": a Fixed report offers no Withdraw")
+    if layout == "tv":
+        check(fixed["back"] is None, where + ": the TV shows no Back button; the remote's BACK does it")
+    else:
+        check(fixed["back"] == "header", where + ": Back is an icon in the header, before My Reports (%s)" % fixed["back"])
+    back_to_list(page, layout)
+    looked = open_row(page, *by_code["subtitles"], layout)
+    check(looked["history"] == ["Reported", "Being looked at"] and not looked["withdraw"], where + ": an Investigating report reads Being looked at and offers no Withdraw")
+    back_to_list(page, layout)
+
+    new = open_row(page, *by_code["other"], layout)
+    if layout == "tv":
+        check(not new["withdraw"], where + ": the TV offers no Withdraw, even for a New report")
+        back_to_list(page, layout)
+    elif layout == "desktop":
+        check(new["withdraw"], where + ": a New report offers Withdraw")
+        back_to_list(page, layout)
+    else:
+        check(new["withdraw"], where + ": a New report offers Withdraw")
+        page.locator(MINE + " .mediaReportsWithdraw").click()
+        page.wait_for_selector(MINE + " .mediaReportsConfirm", timeout=WAIT_MS)
+        check(mine_state(page)["confirm"] == "Withdraw this report?", where + ': Withdraw asks "Withdraw this report?"')
+        page.locator(MINE + " .mediaReportsKeep").click()
+        page.wait_for_timeout(500)
+        s = mine_state(page)
+        check(s["confirm"] is None and s["detail"] and s["detail"]["withdraw"], where + ": Keep it leaves the report in place")
+        page.locator(MINE + " .mediaReportsWithdraw").click()
+        page.wait_for_selector(MINE + " .mediaReportsConfirm", timeout=WAIT_MS)
+        page.locator(MINE + " .mediaReportsWithdrawConfirm").click()
+        page.wait_for_selector(MINE + " .mediaReportsRow", timeout=WAIT_MS)
+        page.wait_for_timeout(500)
+        left = [(r["title"], r["pill"]["text"]) for r in mine_state(page)["rows"]]
+        check(by_code["other"] not in left and len(left) == 3, where + ": a withdrawn report leaves the list (%s)" % left)
+        stored = [r for r in admin("/MediaReports/Admin/Export")["reports"] if r["reporterName"] == user and r["reasonCode"] == "other"]
+        check(not stored, where + ": and is gone from the server")
+
+    poor = open_row(page, *by_code["poor-quality"], layout)
+    check(poor["history"] == ["Reported", "Won't fix"], where + ": a Won't fix report reads Won't fix")
+    back_to_list(page, layout)
+    s = mine_state(page)
+    check(not any(r["unread"] for r in s["rows"]), where + ": opening each changed report clears its mark")
+
+    page.keyboard.press("Escape")
+    wait_mine(page, open_=False)
+    try:
+        page.wait_for_function("() => !document.querySelector('.mediaReportsDot')", timeout=WAIT_MS)
+    except Exception:  # noqa: BLE001 - a timeout is the finding
+        pass
+    check(not entry(page)["dot"], where + ": after closing, the dot is gone")
+    if layout == "tv":
+        page.wait_for_timeout(500)
+        e = entry(page)["row"]
+        check(e is not None and e["count"] is None, where + ": and the Settings row has no count (%s)" % e)
+    else:
+        page.locator("button[aria-controls=app-user-menu]").click()
+        page.wait_for_selector(".mediaReportsMenuItem", state="visible", timeout=WAIT_MS)
+        e = entry(page)["item"]
+        check(e["count"] is None, where + ": and the User Menu entry has no count (%s)" % e["count"])
+        page.keyboard.press("Escape")
+    check(not errors, where + ": no errors from the Report button script" + (": " + "; ".join(errors) if errors else ""))
+    b.close()
+
+
+def my_reports_empty(p):
+    b = browser(p)
+    page = b.new_context(viewport={"width": 1440, "height": 900}).new_page()
+    sign_in(page, "admin")
+    page.wait_for_timeout(1500)
+    check(not entry(page)["dot"], "empty My Reports: no dot without unread reports")
+    page.locator("button[aria-controls=app-user-menu]").click()
+    try:
+        page.wait_for_selector(".mediaReportsMenuItem", state="visible", timeout=WAIT_MS)
+        page.locator(".mediaReportsMenuItem").click()
+        wait_mine(page)
+        page.wait_for_selector(MINE + " .mediaReportsEmpty", timeout=WAIT_MS)
+    except Exception:  # noqa: BLE001 - a timeout is the finding
+        check(False, "empty My Reports: it opens and says so")
+        b.close()
+        return
+    s = mine_state(page)
+    check(s["empty"] == "You haven't reported anything.", "empty My Reports: it says \"You haven't reported anything.\"")
+    check("flag" in (s["emptyHint"] or "") and "favourite" in (s["emptyHint"] or ""), "empty My Reports: it says where the flag button is (%s)" % s["emptyHint"])
+    b.close()
+
+
 PHONE = {"viewport": {"width": 390, "height": 844}, "is_mobile": True, "has_touch": True, "device_scale_factor": 2,
          "user_agent": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36"}
 
@@ -565,6 +911,20 @@ with sync_playwright() as p:
         player = by("poor-quality")
         check(len(player) == 1 and player[0]["snapshot"] and player[0]["snapshot"]["state"] == "Playing",
               layout + ": the player report carries the live playback")
+
+    # My Reports: the admin moves the issues on, and each user follows theirs.
+    issues = {r["reasonCode"]: r["issueId"] for r in export["reports"]}
+    admin("/MediaReports/Admin/Issues/%d" % issues["stutter"], {"status": "Fixed", "notes": SECRET}, method="PATCH")
+    admin("/MediaReports/Admin/Issues/Status", {"issueIds": [issues["subtitles"]], "status": "Investigating"})
+    admin("/MediaReports/Admin/Issues/Status", {"issueIds": [issues["poor-quality"]], "status": "WontFix"})
+    # Bob and Carol have profile pictures, so the dot has to sit above one.
+    for user in admin("/Users"):
+        if user["Name"] in ("bob", "carol"):
+            set_avatar(user["Id"])
+    my_reports(p, "desktop", "alice", {"viewport": {"width": 1440, "height": 900}})
+    my_reports(p, "phone", "bob", PHONE)
+    my_reports(p, "tv", "carol", {"viewport": {"width": 1280, "height": 720}})
+    my_reports_empty(p)
 
     # A retired reason isn't offered; switched off, the page carries no script and no button.
     original = admin("/Plugins/%s/Configuration" % cfg["plugin_id"])

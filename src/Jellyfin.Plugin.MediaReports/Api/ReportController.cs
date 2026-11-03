@@ -131,6 +131,44 @@ public sealed class ReportController : ControllerBase
         return answer.StatusCode == StatusCodes.Status204NoContent ? NoContent() : answer;
     }
 
+    /// <summary>
+    /// Removes one of the caller's closed reports from their list.
+    /// </summary>
+    /// <param name="id">The report.</param>
+    /// <returns>No content.</returns>
+    [HttpPost("Mine/{id}/Hide")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult> Hide([FromRoute] long id)
+    {
+        var (userId, _) = await Caller().ConfigureAwait(false);
+        if (userId is null)
+        {
+            return Forbid();
+        }
+
+        var answer = Answer(() => _service.Hide(userId.Value, id), StatusCodes.Status204NoContent);
+        return answer.StatusCode == StatusCodes.Status204NoContent ? NoContent() : answer;
+    }
+
+    /// <summary>
+    /// Removes every closed report from the caller's list.
+    /// </summary>
+    /// <returns>How many were removed.</returns>
+    [HttpPost("Mine/HideClosed")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<ActionResult<HiddenReports>> HideClosed()
+    {
+        var (userId, _) = await Caller().ConfigureAwait(false);
+        if (userId is null)
+        {
+            return Forbid();
+        }
+
+        return Answer(() => _service.HideClosed(userId.Value), StatusCodes.Status200OK);
+    }
+
     private async Task<(Guid? UserId, string? DeviceId)> Caller()
     {
         var info = await _authorization.GetAuthorizationInfo(HttpContext).ConfigureAwait(false);

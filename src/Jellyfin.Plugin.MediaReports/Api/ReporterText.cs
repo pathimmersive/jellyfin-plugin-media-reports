@@ -36,6 +36,31 @@ public static class ReporterText
     };
 
     /// <summary>
+    /// Gets how a closed report's expiry reads: whole months, rounded, from 60 days up;
+    /// days below that; "Expires today" under one day.
+    /// </summary>
+    /// <param name="expiresAt">When the report is purged.</param>
+    /// <param name="now">The current time.</param>
+    /// <returns>The label.</returns>
+    public static string ExpiryLabel(DateTimeOffset expiresAt, DateTimeOffset now)
+    {
+        var days = (expiresAt - now).TotalDays;
+        if (days < 1)
+        {
+            return "Expires today";
+        }
+
+        if (days < 60)
+        {
+            var whole = (int)Math.Ceiling(days);
+            return whole == 1 ? "Expires in 1 day" : string.Create(CultureInfo.InvariantCulture, $"Expires in {whole} days");
+        }
+
+        var months = (int)Math.Round(days / 30.4375, MidpointRounding.AwayFromZero);
+        return string.Create(CultureInfo.InvariantCulture, $"Expires in {months} months");
+    }
+
+    /// <summary>
     /// Reads the status a "status changed" event moved to, from its "Old → New" detail.
     /// </summary>
     /// <param name="detail">The event's detail.</param>

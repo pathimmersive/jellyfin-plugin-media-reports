@@ -59,6 +59,7 @@ Everything stays on your Jellyfin server. Data leaves the server only through th
 - `snapshot`: the playback details, as JSON: client and version, device name, play method, transcode reasons and output, position, the audio and subtitle streams, and the source file's streams. It holds no IP address, no file path and no user id.
 - `play_method`, `transcode_reasons`, `client`, `device`: copies from the snapshot, for filtering.
 - `reporter_seen_at`: when the reporter last opened the report, for the unread mark.
+- `reporter_hidden_at`: when the reporter removed the closed report from their own list.
 
 `issue`: one row per problem, grouping reports on the same title and reason.
 

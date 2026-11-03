@@ -173,12 +173,33 @@ public sealed record StatusChangeResult(StatusChange Result, long? ConflictingIs
 /// <param name="Report">The report.</param>
 /// <param name="Status">The issue's status.</param>
 /// <param name="StatusChangedAt">When the issue's status last changed, or null if never.</param>
-public sealed record ReporterReport(StoredReport Report, IssueStatus Status, DateTimeOffset? StatusChangedAt)
+/// <param name="ClosedAt">When the issue closed, or null while it is open.</param>
+public sealed record ReporterReport(StoredReport Report, IssueStatus Status, DateTimeOffset? StatusChangedAt, DateTimeOffset? ClosedAt = null)
 {
     /// <summary>
     /// Gets a value indicating whether the status changed after the reporter filed or last opened the report.
     /// </summary>
     public bool Unread => StatusChangedAt > (Report.ReporterSeenAt ?? Report.CreatedAt);
+
+    /// <summary>
+    /// Gets a value indicating whether the reporter removed it from their list and its status hasn't changed since.
+    /// </summary>
+    public bool Hidden => Report.ReporterHiddenAt is { } hidden && !(StatusChangedAt > hidden);
+}
+
+/// <summary>
+/// The result of a reporter removing a report from their list.
+/// </summary>
+public enum Hiding
+{
+    /// <summary>The report is no longer listed.</summary>
+    Hidden,
+
+    /// <summary>No such report, or it is another user's.</summary>
+    NotFound,
+
+    /// <summary>The report's issue is still open.</summary>
+    NotClosed,
 }
 
 /// <summary>
@@ -263,6 +284,9 @@ public sealed record StoredReport
 
     /// <summary>Gets when the reporter last saw the issue's status.</summary>
     public DateTimeOffset? ReporterSeenAt { get; init; }
+
+    /// <summary>Gets when the reporter removed the report from their list, if they did.</summary>
+    public DateTimeOffset? ReporterHiddenAt { get; init; }
 }
 
 /// <summary>

@@ -16,7 +16,7 @@ public sealed class ReportDatabase
     /// <summary>
     /// The schema version this build writes.
     /// </summary>
-    public const int SchemaVersion = 2;
+    public const int SchemaVersion = 3;
 
     /// <summary>
     /// The schema changes in order; entry <c>n</c> moves a database from version <c>n</c> to <c>n + 1</c>.
@@ -91,6 +91,11 @@ public sealed class ReportDatabase
             user_id TEXT PRIMARY KEY,
             seen_at TEXT NOT NULL
         );
+        """,
+
+        // 3: when a reporter removed a closed report from their list.
+        """
+        ALTER TABLE report ADD COLUMN reporter_hidden_at TEXT;
         """,
     ];
 

@@ -173,26 +173,59 @@ public sealed class ReportService
     }
 
     /// <summary>
-    /// Lists the caller's reports, newest first, with the unread count. Works while reporting is off.
+    /// Lists the caller's reports, newest first, with the unread count, leaving out those they
+    /// removed from their list. A closed report says when the purge will delete it. Works while
+    /// reporting is off.
     /// </summary>
     /// <param name="userId">The caller.</param>
     /// <returns>The reports.</returns>
     public ServiceResult<MyReports> Mine(Guid userId)
     {
-        var reasons = _config().GetReasons();
-        var rows = _store.GetReporterReports(userId).Select(r => new MyReportRow
+        var config = _config();
+        var reasons = config.GetReasons();
+        var now = _time.GetUtcNow();
+        var rows = _store.GetReporterReports(userId).Where(r => !r.Hidden).Select(r =>
         {
-            Id = r.Report.Id,
-            ItemId = r.Report.ItemId,
-            Title = ReporterText.Title(r.Report),
-            ReasonLabel = Label(reasons, r.Report.ReasonCode),
-            CreatedAt = r.Report.CreatedAt,
-            Status = r.Status.ToString(),
-            StatusLabel = ReporterText.StatusLabel(r.Status),
-            Unread = r.Unread,
+            DateTimeOffset? expires = r.ClosedAt is { } closed && config.ReportRetentionDays > 0 ? closed.AddDays(config.ReportRetentionDays) : null;
+            return new MyReportRow
+            {
+                Id = r.Report.Id,
+                ItemId = r.Report.ItemId,
+                Title = ReporterText.Title(r.Report),
+                ReasonLabel = Label(reasons, r.Report.ReasonCode),
+                CreatedAt = r.Report.CreatedAt,
+                Status = r.Status.ToString(),
+                StatusLabel = ReporterText.StatusLabel(r.Status),
+                Unread = r.Unread,
+                ExpiresAt = expires,
+                ExpiresLabel = expires is { } at ? ReporterText.ExpiryLabel(at, now) : null,
+                CanHide = r.ClosedAt is not null,
+                CanWithdraw = r.Status == IssueStatus.New,
+            };
         }).ToList();
         return ServiceResult<MyReports>.Success(new MyReports { Reports = rows, Unread = rows.Count(r => r.Unread) });
     }
+
+    /// <summary>
+    /// Removes one of the caller's closed reports from their list. Works while reporting is off.
+    /// </summary>
+    /// <param name="userId">The caller.</param>
+    /// <param name="reportId">The report.</param>
+    /// <returns>Success, or a refusal.</returns>
+    public ServiceResult<bool> Hide(Guid userId, long reportId) => _store.HideFromReporter(reportId, userId) switch
+    {
+        Hiding.Hidden => ServiceResult<bool>.Success(true),
+        Hiding.NotClosed => ServiceResult<bool>.Refuse(Outcome.Conflict, "not-closed", "The report is still open, so it stays in your list."),
+        _ => ReportNotFound<bool>(),
+    };
+
+    /// <summary>
+    /// Removes every closed report from the caller's list. Works while reporting is off.
+    /// </summary>
+    /// <param name="userId">The caller.</param>
+    /// <returns>How many were removed.</returns>
+    public ServiceResult<HiddenReports> HideClosed(Guid userId)
+        => ServiceResult<HiddenReports>.Success(new HiddenReports { Hidden = _store.HideClosedFromReporter(userId) });
 
     /// <summary>
     /// Opens one of the caller's reports and records that they have seen its current status.

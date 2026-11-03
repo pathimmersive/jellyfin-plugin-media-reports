@@ -2,6 +2,7 @@ using System;
 using Jellyfin.Data.Events.Users;
 using Jellyfin.Plugin.MediaReports.Api;
 using Jellyfin.Plugin.MediaReports.Configuration;
+using Jellyfin.Plugin.MediaReports.Notifications;
 using Jellyfin.Plugin.MediaReports.Playback;
 using Jellyfin.Plugin.MediaReports.Storage;
 using Jellyfin.Plugin.MediaReports.Web;
@@ -37,6 +38,10 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
             provider.GetRequiredService<ReportStore>(),
             () => Plugin.Instance?.Configuration ?? new PluginConfiguration(),
             TimeProvider.System));
+        serviceCollection.AddSingleton(provider => new ReporterNotifier(
+            provider.GetRequiredService<MediaBrowser.Controller.Session.ISessionManager>(),
+            provider.GetRequiredService<ReportStore>(),
+            provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ReporterNotifier>>()));
         serviceCollection.AddSingleton(provider => new AdminService(
             provider.GetRequiredService<ReportStore>(),
             provider.GetRequiredService<MediaBrowser.Controller.Library.ILibraryManager>(),
@@ -45,7 +50,8 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
             provider.GetRequiredService<MediaBrowser.Controller.Providers.IProviderManager>(),
             provider.GetRequiredService<MediaBrowser.Model.IO.IFileSystem>(),
             () => Plugin.Instance?.Configuration ?? new PluginConfiguration(),
-            () => applicationHost.SystemId));
+            () => applicationHost.SystemId,
+            provider.GetRequiredService<ReporterNotifier>()));
         serviceCollection.AddScoped<IEventConsumer<UserDeletedEventArgs>, UserDeletedConsumer>();
         serviceCollection.AddTransient<IStartupFilter, IndexPageStartupFilter>();
     }

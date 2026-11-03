@@ -164,7 +164,22 @@ public sealed record FiledReport(long ReportId, long IssueId);
 /// </summary>
 /// <param name="Result">What happened.</param>
 /// <param name="ConflictingIssueId">For <see cref="StatusChange.NewerOpenIssue"/>, the open issue.</param>
-public sealed record StatusChangeResult(StatusChange Result, long? ConflictingIssueId = null);
+/// <param name="Closed">True when the change moved an open issue into a closed status.</param>
+public sealed record StatusChangeResult(StatusChange Result, long? ConflictingIssueId = null, bool Closed = false);
+
+/// <summary>
+/// One of a reporter's reports with where its issue stands.
+/// </summary>
+/// <param name="Report">The report.</param>
+/// <param name="Status">The issue's status.</param>
+/// <param name="StatusChangedAt">When the issue's status last changed, or null if never.</param>
+public sealed record ReporterReport(StoredReport Report, IssueStatus Status, DateTimeOffset? StatusChangedAt)
+{
+    /// <summary>
+    /// Gets a value indicating whether the status changed after the reporter filed or last opened the report.
+    /// </summary>
+    public bool Unread => StatusChangedAt > (Report.ReporterSeenAt ?? Report.CreatedAt);
+}
 
 /// <summary>
 /// A stored report.

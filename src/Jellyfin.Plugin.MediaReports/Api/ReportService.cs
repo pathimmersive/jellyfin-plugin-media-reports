@@ -172,6 +172,86 @@ public sealed class ReportService
         });
     }
 
+    /// <summary>
+    /// Lists the caller's reports, newest first, with the unread count. Works while reporting is off.
+    /// </summary>
+    /// <param name="userId">The caller.</param>
+    /// <returns>The reports.</returns>
+    public ServiceResult<MyReports> Mine(Guid userId)
+    {
+        var reasons = _config().GetReasons();
+        var rows = _store.GetReporterReports(userId).Select(r => new MyReportRow
+        {
+            Id = r.Report.Id,
+            ItemId = r.Report.ItemId,
+            Title = ReporterText.Title(r.Report),
+            ReasonLabel = Label(reasons, r.Report.ReasonCode),
+            CreatedAt = r.Report.CreatedAt,
+            Status = r.Status.ToString(),
+            StatusLabel = ReporterText.StatusLabel(r.Status),
+            Unread = r.Unread,
+        }).ToList();
+        return ServiceResult<MyReports>.Success(new MyReports { Reports = rows, Unread = rows.Count(r => r.Unread) });
+    }
+
+    /// <summary>
+    /// Opens one of the caller's reports and records that they have seen its current status.
+    /// </summary>
+    /// <param name="userId">The caller.</param>
+    /// <param name="reportId">The report.</param>
+    /// <returns>The report, or not found when it isn't the caller's.</returns>
+    public ServiceResult<MyReportDetail> MineDetail(Guid userId, long reportId)
+    {
+        var mine = _store.GetReporterReports(userId).FirstOrDefault(r => r.Report.Id == reportId);
+        if (mine is null)
+        {
+            return ReportNotFound<MyReportDetail>();
+        }
+
+        var report = mine.Report;
+        var changes = _store.GetIssueEvents(report.IssueId)
+            .Where(e => e.Kind == "status changed" && e.At >= report.CreatedAt)
+            .Select(e => (e.At, Status: ReporterText.StatusChangedTo(e.Detail)))
+            .Where(e => e.Status is not null)
+            .Select(e => new MyReportStep(e.At, ReporterText.StatusLabel(e.Status!.Value)));
+        _store.MarkReporterSeen(report.Id);
+        return ServiceResult<MyReportDetail>.Success(new MyReportDetail
+        {
+            Id = report.Id,
+            ItemId = report.ItemId,
+            Title = ReporterText.Title(report),
+            ReasonLabel = Label(_config().GetReasons(), report.ReasonCode),
+            Note = report.Note,
+            Device = report.Device,
+            CreatedAt = report.CreatedAt,
+            Status = mine.Status.ToString(),
+            StatusLabel = ReporterText.StatusLabel(mine.Status),
+            CanWithdraw = mine.Status == IssueStatus.New,
+            History = [new MyReportStep(report.CreatedAt, "Reported"), .. changes],
+        });
+    }
+
+    /// <summary>
+    /// Withdraws one of the caller's reports while its issue is New.
+    /// </summary>
+    /// <param name="userId">The caller.</param>
+    /// <param name="reportId">The report.</param>
+    /// <returns>Success, or a refusal.</returns>
+    public ServiceResult<bool> Withdraw(Guid userId, long reportId)
+    {
+        if (!_config().ReportingEnabled)
+        {
+            return ReportingOff<bool>();
+        }
+
+        return _store.Withdraw(reportId, userId) switch
+        {
+            Withdrawal.Withdrawn => ServiceResult<bool>.Success(true),
+            Withdrawal.NotNew => ServiceResult<bool>.Refuse(Outcome.Conflict, "not-new", "The report is already being looked at, so it can't be withdrawn."),
+            _ => ReportNotFound<bool>(),
+        };
+    }
+
     private BaseItem? FindItem(Guid userId, Guid itemId)
     {
         var user = _users.GetUserById(userId);
@@ -219,4 +299,7 @@ public sealed class ReportService
 
     private static ServiceResult<T> NotFound<T>() =>
         ServiceResult<T>.Refuse(Outcome.NotFound, "item-not-found", "That title isn't in your library.");
+
+    private static ServiceResult<T> ReportNotFound<T>() =>
+        ServiceResult<T>.Refuse(Outcome.NotFound, "report-not-found", "You have no report with that id.");
 }

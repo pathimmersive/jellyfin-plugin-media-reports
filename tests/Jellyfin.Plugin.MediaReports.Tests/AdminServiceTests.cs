@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Jellyfin.Database.Implementations.Entities;
 using Jellyfin.Plugin.MediaReports.Api;
 using Jellyfin.Plugin.MediaReports.Configuration;
+using Jellyfin.Plugin.MediaReports.Notifications;
 using Jellyfin.Plugin.MediaReports.Storage;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Movies;
@@ -65,7 +66,7 @@ public sealed class AdminServiceTests : IDisposable
             new MediaStream { Type = MediaStreamType.Audio, Codec = "aac", Language = "eng", IsDefault = true },
             new MediaStream { Type = MediaStreamType.Subtitle, Codec = "srt", Language = "fre" },
         ]);
-        _service = new AdminService(_store, _library.Object, _users.Object, _mediaSources.Object, _providers.Object, Mock.Of<IFileSystem>(), () => _config, () => "server-1");
+        _service = new AdminService(_store, _library.Object, _users.Object, _mediaSources.Object, _providers.Object, Mock.Of<IFileSystem>(), () => _config, () => "server-1", new ReporterNotifier(Mock.Of<MediaBrowser.Controller.Session.ISessionManager>(), _store, NullLogger<ReporterNotifier>.Instance));
     }
 
     public void Dispose()
@@ -332,7 +333,7 @@ public sealed class AdminServiceTests : IDisposable
     public async Task Controller_AnswersStorageUnavailable_WhenTheDatabaseDidNotOpen()
     {
         var db = new ReportDatabase(Path.Combine(_dir, "never-opened.db"), NullLogger<ReportDatabase>.Instance);
-        var service = new AdminService(new ReportStore(db, _clock, () => 365), _library.Object, _users.Object, _mediaSources.Object, _providers.Object, Mock.Of<IFileSystem>(), () => _config, () => "server-1");
+        var service = new AdminService(new ReportStore(db, _clock, () => 365), _library.Object, _users.Object, _mediaSources.Object, _providers.Object, Mock.Of<IFileSystem>(), () => _config, () => "server-1", new ReporterNotifier(Mock.Of<MediaBrowser.Controller.Session.ISessionManager>(), _store, NullLogger<ReporterNotifier>.Instance));
         var authorization = new Mock<IAuthorizationContext>();
         authorization.Setup(m => m.GetAuthorizationInfo(It.IsAny<HttpContext>())).ReturnsAsync(new AuthorizationInfo { User = _admin });
         var controller = new AdminController(service, authorization.Object) { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() } };

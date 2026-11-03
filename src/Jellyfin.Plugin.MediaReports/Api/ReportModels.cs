@@ -152,3 +152,91 @@ public sealed record FiledReportView
     /// <summary>Gets the playback attached, or null.</summary>
     public AttachedPlayback? Playback { get; init; }
 }
+
+/// <summary>
+/// The caller's reports and how many have news.
+/// </summary>
+public sealed record MyReports
+{
+    /// <summary>Gets the reports, newest first.</summary>
+    public IReadOnlyList<MyReportRow> Reports { get; init; } = [];
+
+    /// <summary>Gets how many are unread.</summary>
+    public int Unread { get; init; }
+}
+
+/// <summary>
+/// One of the caller's reports in their list.
+/// </summary>
+public sealed record MyReportRow
+{
+    /// <summary>Gets the report id.</summary>
+    public long Id { get; init; }
+
+    /// <summary>Gets the reported item.</summary>
+    public Guid ItemId { get; init; }
+
+    /// <summary>Gets the title as the reporter sees it.</summary>
+    public string Title { get; init; } = string.Empty;
+
+    /// <summary>Gets the reason's current label.</summary>
+    public string ReasonLabel { get; init; } = string.Empty;
+
+    /// <summary>Gets when it was filed.</summary>
+    public DateTimeOffset CreatedAt { get; init; }
+
+    /// <summary>Gets the issue's status.</summary>
+    public string Status { get; init; } = string.Empty;
+
+    /// <summary>Gets the status as the reporter sees it.</summary>
+    public string StatusLabel { get; init; } = string.Empty;
+
+    /// <summary>Gets a value indicating whether the status changed since the reporter last opened it.</summary>
+    public bool Unread { get; init; }
+}
+
+/// <summary>
+/// One of the caller's reports, opened.
+/// </summary>
+public sealed record MyReportDetail
+{
+    /// <summary>Gets the report id.</summary>
+    public long Id { get; init; }
+
+    /// <summary>Gets the reported item.</summary>
+    public Guid ItemId { get; init; }
+
+    /// <summary>Gets the title as the reporter sees it.</summary>
+    public string Title { get; init; } = string.Empty;
+
+    /// <summary>Gets the reason's current label.</summary>
+    public string ReasonLabel { get; init; } = string.Empty;
+
+    /// <summary>Gets the reporter's note, or null.</summary>
+    public string? Note { get; init; }
+
+    /// <summary>Gets the device the playback was on, or null.</summary>
+    public string? Device { get; init; }
+
+    /// <summary>Gets when it was filed.</summary>
+    public DateTimeOffset CreatedAt { get; init; }
+
+    /// <summary>Gets the issue's status.</summary>
+    public string Status { get; init; } = string.Empty;
+
+    /// <summary>Gets the status as the reporter sees it.</summary>
+    public string StatusLabel { get; init; } = string.Empty;
+
+    /// <summary>Gets a value indicating whether the reporter can still withdraw it.</summary>
+    public bool CanWithdraw { get; init; }
+
+    /// <summary>Gets the filing and every status change since, oldest first.</summary>
+    public IReadOnlyList<MyReportStep> History { get; init; } = [];
+}
+
+/// <summary>
+/// A step in a report's history as the reporter sees it.
+/// </summary>
+/// <param name="At">When.</param>
+/// <param name="Label">"Reported", or the status it moved to.</param>
+public sealed record MyReportStep(DateTimeOffset At, string Label);

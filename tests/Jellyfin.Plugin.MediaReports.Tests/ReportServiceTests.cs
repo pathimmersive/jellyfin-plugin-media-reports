@@ -255,6 +255,102 @@ public sealed class ReportServiceTests : IDisposable
         }
     }
 
+    [Fact]
+    public void Mine_ListsOnlyTheCallersReportsNewestFirst_WithTitlesAndReporterLabels()
+    {
+        var movie = Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)));
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        var episode = Ok(_service.File(_alice.Id, null, new FileReportRequest(EpisodeId, "audio", null)));
+        Ok(_service.File(_bob.Id, null, new FileReportRequest(SeriesId, "audio", null)));
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        _store.SetStatus(episode.IssueId, IssueStatus.Investigating, _bob.Id);
+
+        var mine = Ok(_service.Mine(_alice.Id));
+
+        Assert.Equal([episode.Id, movie.Id], mine.Reports.Select(r => r.Id));
+        Assert.Equal(("Test Series S02E05", "Being looked at"), (mine.Reports[0].Title, mine.Reports[0].StatusLabel));
+        Assert.Equal(("Test Movie", "New", "Stutter or jitter"), (mine.Reports[1].Title, mine.Reports[1].StatusLabel, mine.Reports[1].ReasonLabel));
+    }
+
+    [Fact]
+    public void Mine_MarksAReportUnreadWhenItsStatusChanges_AndReadingItClearsTheMark()
+    {
+        var filed = Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)));
+        Assert.Equal(0, Ok(_service.Mine(_alice.Id)).Unread);
+
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        _store.SetStatus(filed.IssueId, IssueStatus.Fixed, _bob.Id);
+        var mine = Ok(_service.Mine(_alice.Id));
+        Assert.Equal((1, true, "Fixed"), (mine.Unread, mine.Reports[0].Unread, mine.Reports[0].StatusLabel));
+
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        Ok(_service.MineDetail(_alice.Id, filed.Id));
+        mine = Ok(_service.Mine(_alice.Id));
+        Assert.Equal((0, false), (mine.Unread, mine.Reports[0].Unread));
+    }
+
+    [Fact]
+    public void MineDetail_GivesReasonNoteDeviceAndHistory_ButNotTheAdminsNotes()
+    {
+        Play("tv", _alice, "Living Room TV");
+        var filed = Ok(_service.File(_alice.Id, "tv-id", new FileReportRequest(MovieId, "stutter", "Jumps back every few seconds")));
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        _store.UpdateIssue(filed.IssueId, IssueStatus.Investigating, "Secret admin note", _bob.Id);
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        _store.UpdateIssue(filed.IssueId, IssueStatus.WontFix, "Resolution: the source is bad", _bob.Id);
+
+        var detail = Ok(_service.MineDetail(_alice.Id, filed.Id));
+
+        Assert.Equal(("Stutter or jitter", "Jumps back every few seconds", "Living Room TV"), (detail.ReasonLabel, detail.Note, detail.Device));
+        Assert.Equal(("WontFix", "Won't fix", false), (detail.Status, detail.StatusLabel, detail.CanWithdraw));
+        Assert.Equal(["Reported", "Being looked at", "Won't fix"], detail.History.Select(h => h.Label));
+        var json = JsonSerializer.Serialize(detail);
+        Assert.DoesNotContain("Secret", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("Resolution", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("bob", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void MineDetail_AndWithdraw_OfAnotherUsersReport_AreNotFound_AndChangeNothing()
+    {
+        var bobs = Ok(_service.File(_bob.Id, null, new FileReportRequest(MovieId, "stutter", null)));
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        _store.SetStatus(bobs.IssueId, IssueStatus.Fixed, _alice.Id);
+
+        AssertRefused(_service.MineDetail(_alice.Id, bobs.Id), Outcome.NotFound, "report-not-found");
+        AssertRefused(_service.Withdraw(_alice.Id, bobs.Id), Outcome.NotFound, "report-not-found");
+        AssertRefused(_service.MineDetail(_alice.Id, 9999), Outcome.NotFound, "report-not-found");
+
+        Assert.NotNull(_store.GetReport(bobs.Id));
+        Assert.True(Ok(_service.Mine(_bob.Id)).Reports[0].Unread);
+    }
+
+    [Fact]
+    public void Withdraw_RemovesANewReport_AndRefusesOneBeingLookedAt()
+    {
+        var fresh = Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)));
+        var worked = Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "audio", null)));
+        _store.SetStatus(worked.IssueId, IssueStatus.Investigating, _bob.Id);
+
+        Ok(_service.Withdraw(_alice.Id, fresh.Id));
+        AssertRefused(_service.Withdraw(_alice.Id, worked.Id), Outcome.Conflict, "not-new");
+
+        Assert.Null(_store.GetReport(fresh.Id));
+        Assert.Equal([worked.Id], Ok(_service.Mine(_alice.Id)).Reports.Select(r => r.Id));
+    }
+
+    [Fact]
+    public void ReportingOff_StillListsAndOpensTheCallersReports_ButRefusesWithdraw()
+    {
+        var filed = Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)));
+        _config.ReportingEnabled = false;
+
+        Assert.Single(Ok(_service.Mine(_alice.Id)).Reports);
+        Ok(_service.MineDetail(_alice.Id, filed.Id));
+        AssertRefused(_service.Withdraw(_alice.Id, filed.Id), Outcome.Forbidden, "reporting-off");
+        Assert.NotNull(_store.GetReport(filed.Id));
+    }
+
     private static T Ok<T>(ServiceResult<T> result)
     {
         Assert.True(result.Outcome == Outcome.Ok, $"{result.Outcome} {result.Code}");

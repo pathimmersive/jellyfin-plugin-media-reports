@@ -73,6 +73,64 @@ public sealed class ReportController : ControllerBase
         return Answer(() => _service.File(userId.Value, deviceId, request), StatusCodes.Status201Created);
     }
 
+    /// <summary>
+    /// Lists the caller's reports, newest first, with how many have an unread status change.
+    /// </summary>
+    /// <returns>The reports.</returns>
+    [HttpGet("Mine")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<ActionResult<MyReports>> GetMine()
+    {
+        var (userId, _) = await Caller().ConfigureAwait(false);
+        if (userId is null)
+        {
+            return Forbid();
+        }
+
+        return Answer(() => _service.Mine(userId.Value), StatusCodes.Status200OK);
+    }
+
+    /// <summary>
+    /// Opens one of the caller's reports and marks its status as seen.
+    /// </summary>
+    /// <param name="id">The report.</param>
+    /// <returns>The report.</returns>
+    [HttpGet("Mine/{id}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<MyReportDetail>> GetMineDetail([FromRoute] long id)
+    {
+        var (userId, _) = await Caller().ConfigureAwait(false);
+        if (userId is null)
+        {
+            return Forbid();
+        }
+
+        return Answer(() => _service.MineDetail(userId.Value, id), StatusCodes.Status200OK);
+    }
+
+    /// <summary>
+    /// Withdraws one of the caller's reports while it is New.
+    /// </summary>
+    /// <param name="id">The report.</param>
+    /// <returns>No content.</returns>
+    [HttpDelete("Mine/{id}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult> Withdraw([FromRoute] long id)
+    {
+        var (userId, _) = await Caller().ConfigureAwait(false);
+        if (userId is null)
+        {
+            return Forbid();
+        }
+
+        var answer = Answer(() => _service.Withdraw(userId.Value, id), StatusCodes.Status204NoContent);
+        return answer.StatusCode == StatusCodes.Status204NoContent ? NoContent() : answer;
+    }
+
     private async Task<(Guid? UserId, string? DeviceId)> Caller()
     {
         var info = await _authorization.GetAuthorizationInfo(HttpContext).ConfigureAwait(false);

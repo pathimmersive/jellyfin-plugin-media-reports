@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text.Json;
 using Jellyfin.Data.Enums;
 using Jellyfin.Plugin.MediaReports.Configuration;
+using Jellyfin.Plugin.MediaReports.Notifications;
 using Jellyfin.Plugin.MediaReports.Storage;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Movies;
@@ -43,6 +44,7 @@ public sealed class AdminService
     private readonly IFileSystem _fileSystem;
     private readonly Func<PluginConfiguration> _config;
     private readonly Func<string> _serverId;
+    private readonly ReporterNotifier _notifier;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AdminService"/> class.
@@ -55,7 +57,8 @@ public sealed class AdminService
     /// <param name="fileSystem">The file system, for refresh options.</param>
     /// <param name="config">Returns the current configuration; read on every call.</param>
     /// <param name="serverId">Returns the server id.</param>
-    public AdminService(ReportStore store, ILibraryManager library, IUserManager users, IMediaSourceManager mediaSources, IProviderManager providers, IFileSystem fileSystem, Func<PluginConfiguration> config, Func<string> serverId)
+    /// <param name="notifier">Tells reporters when their issue closes.</param>
+    public AdminService(ReportStore store, ILibraryManager library, IUserManager users, IMediaSourceManager mediaSources, IProviderManager providers, IFileSystem fileSystem, Func<PluginConfiguration> config, Func<string> serverId, ReporterNotifier notifier)
     {
         _store = store;
         _library = library;
@@ -65,6 +68,7 @@ public sealed class AdminService
         _fileSystem = fileSystem;
         _config = config;
         _serverId = serverId;
+        _notifier = notifier;
     }
 
     /// <summary>
@@ -229,6 +233,11 @@ public sealed class AdminService
         }
 
         var result = _store.UpdateIssue(issueId, status, patch.Notes, adminId);
+        if (result.Closed)
+        {
+            _ = _notifier.NotifyClosedAsync([issueId]);
+        }
+
         return result.Result switch
         {
             StatusChange.NotFound => IssueNotFound<IssueDetail>(),
@@ -255,9 +264,11 @@ public sealed class AdminService
             return ServiceResult<IReadOnlyList<long>>.Refuse(Outcome.BadRequest, "no-issues", "No issues were given.");
         }
 
-        var refused = _store.SetStatuses(request.IssueIds, status, adminId);
+        var closed = new List<long>();
+        var refused = _store.SetStatuses(request.IssueIds, status, adminId, closed);
         if (refused.Count == 0)
         {
+            _ = _notifier.NotifyClosedAsync(closed);
             return ServiceResult<IReadOnlyList<long>>.Success(request.IssueIds.Distinct().ToList());
         }
 

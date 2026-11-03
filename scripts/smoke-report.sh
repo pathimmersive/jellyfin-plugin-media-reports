@@ -3,6 +3,8 @@
 # as one user on a "TV", then files reports through the report API from that user's
 # "phone" and from a second user. Checks the context the API describes, the playback it
 # attaches, grouping into one issue, every refusal, retired reasons and the reporting switch.
+# Then lists, opens and withdraws the users' own reports, closes an issue as the admin, and
+# reads the notice that arrives on the reporter's websocket.
 #
 # Usage: scripts/smoke-report.sh [--without-plugin]
 #   --without-plugin  start the server with no plugin; the script must fail
@@ -153,6 +155,9 @@ ok "Living Room TV" "$alice_tv" POST /Sessions/Playing/Stopped "$(state 20000000
 
 echo "== access"
 expect 401 "" "" "" GET "/MediaReports/Report/Context?itemId=$item_id"
+expect 401 "" "" "" GET /MediaReports/Report/Mine
+expect 401 "" "" "" GET /MediaReports/Report/Mine/1
+expect 401 "" "" "" DELETE /MediaReports/Report/Mine/1
 expect 404 item-not-found "Alice Phone" "$alice_phone" GET "/MediaReports/Report/Context?itemId=$(py -c 'import uuid;print(uuid.uuid4())')"
 
 echo "== context from alice's phone names the TV playback"
@@ -199,6 +204,10 @@ expect 400 reason-not-allowed "Alice Phone" "$alice_phone" POST /MediaReports/Re
 set_config off
 expect 403 reporting-off "Alice Phone" "$alice_phone" POST /MediaReports/Report "{\"itemId\":\"$item_id\",\"reasonCode\":\"audio\"}"
 expect 403 reporting-off "Alice Phone" "$alice_phone" GET "/MediaReports/Report/Context?itemId=$item_id"
+alice_report="$(json "d['Id']" <"$work/results/alice.json")"
+ok "Alice Phone" "$alice_phone" GET /MediaReports/Report/Mine | json "len(d['Reports'])" | grep -x 1 >/dev/null \
+  || fail "with reporting off, Mine did not list alice's report"
+expect 403 reporting-off "Alice Phone" "$alice_phone" DELETE "/MediaReports/Report/Mine/$alice_report"
 set_config on
 ok "Alice Phone" "$alice_phone" POST /MediaReports/Report "{\"itemId\":\"$item_id\",\"reasonCode\":\"audio\"}" >/dev/null
 echo "reporting off refused, on again accepted"
@@ -223,6 +232,144 @@ for name in ("context.json", "context-after.json", "alice.json"):
     text = open(os.path.join(r, name)).read().lower()
     assert "/media/" not in text and ".mkv" not in text and "bob" not in text, name
 print("stored: 3 reports, alice and bob in one issue, snapshot from the TV; no path or other user in alice's answers")
+PY
+
+echo "== alice's phone connects its websocket the way an app does"
+ok "Alice Phone" "$alice_phone" POST /Sessions/Capabilities/Full \
+  '{"PlayableMediaTypes":["Video"],"SupportedCommands":["DisplayMessage"],"SupportsMediaControl":true}' >/dev/null
+rm -f "$work/results/ready" "$work/results/notices.json"
+# A minimal RFC 6455 client, since the standard library has none. It records every DisplayMessage.
+py - "$port" "$(auth "Alice Phone" "$alice_phone")" "$work/results" <<'PY' &
+import base64, json, os, socket, struct, sys, time
+port, authorization, out = sys.argv[1:4]
+s = socket.create_connection(("127.0.0.1", int(port)), timeout=20)
+key = base64.b64encode(os.urandom(16)).decode()
+s.sendall((f"GET /socket HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+           f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\nAuthorization: {authorization}\r\n\r\n").encode())
+buf = b""
+while b"\r\n\r\n" not in buf:
+    chunk = s.recv(4096)
+    if not chunk:
+        sys.exit("the server closed the websocket handshake")
+    buf += chunk
+head, buf = buf.split(b"\r\n\r\n", 1)
+if not head.startswith(b"HTTP/1.1 101"):
+    sys.exit("websocket refused: " + head.decode(errors="replace").splitlines()[0])
+open(os.path.join(out, "ready"), "w").close()
+s.settimeout(1)
+
+
+def take(n):
+    global buf
+    while len(buf) < n:
+        chunk = s.recv(4096)
+        if not chunk:
+            raise ConnectionError("closed")
+        buf += chunk
+    data, buf = buf[:n], buf[n:]
+    return data
+
+
+def send(opcode, payload):
+    mask = os.urandom(4)
+    s.sendall(bytes([0x80 | opcode, 0x80 | len(payload)]) + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(payload)))
+
+
+notices = []
+deadline = time.time() + 240
+while time.time() < deadline:
+    try:
+        b0, b1 = take(2)
+        size = b1 & 0x7F
+        if size == 126:
+            size = struct.unpack(">H", take(2))[0]
+        elif size == 127:
+            size = struct.unpack(">Q", take(8))[0]
+        payload = take(size)
+    except socket.timeout:
+        continue
+    except ConnectionError:
+        break
+    opcode = b0 & 0x0F
+    if opcode == 8:
+        break
+    if opcode == 9:
+        send(10, payload)
+        continue
+    message = json.loads(payload)
+    if message.get("MessageType") == "ForceKeepAlive":
+        send(1, b'{"MessageType":"KeepAlive"}')
+    if message.get("MessageType") == "GeneralCommand" and (message.get("Data") or {}).get("Name") == "DisplayMessage":
+        notices.append(message["Data"]["Arguments"])
+        with open(os.path.join(out, "notices.json.part"), "w") as f:
+            json.dump(notices, f)
+        os.replace(os.path.join(out, "notices.json.part"), os.path.join(out, "notices.json"))
+PY
+listener=$!
+trap 'kill "$listener" 2>/dev/null || true; docker rm -f "$container" >/dev/null 2>&1 || true' EXIT
+deadline=$((SECONDS + 30))
+until [[ -f "$work/results/ready" ]]; do
+  (( SECONDS < deadline )) || fail "the websocket did not open"
+  kill -0 "$listener" 2>/dev/null || fail "the websocket listener exited"
+  sleep 1
+done
+sleep 2
+ok "admin box" "$admin" GET /Sessions >"$work/results/sessions.json"
+py - "$work/results/sessions.json" <<'PY' || fail "the sessions are not what the notice check needs"
+import json, sys
+by_device = {s["DeviceName"]: bool(s.get("SupportsRemoteControl")) for s in json.load(open(sys.argv[1])) if s.get("UserName") == "alice"}
+assert by_device.get("Alice Phone") is True and by_device.get("Living Room TV") is False, by_device
+print("alice's phone takes remote control, her TV session doesn't:", by_device)
+PY
+
+echo "== my reports, and what another user can't do with them"
+issue="$(json "d['IssueId']" <"$work/results/alice.json")"
+ok "Alice Phone" "$alice_phone" GET /MediaReports/Report/Mine >"$work/results/mine-before.json"
+audio_report="$(json "d['Reports'][0]['Id']" <"$work/results/mine-before.json")"
+expect 404 report-not-found "Bob Laptop" "$bob" GET "/MediaReports/Report/Mine/$alice_report"
+expect 404 report-not-found "Bob Laptop" "$bob" DELETE "/MediaReports/Report/Mine/$alice_report"
+expect 404 report-not-found "Bob Laptop" "$bob" DELETE "/MediaReports/Report/Mine/$audio_report"
+
+echo "== withdraw while New, refused once it is being looked at"
+ok "admin box" "$admin" POST /MediaReports/Admin/Issues/Status "{\"issueIds\":[$issue],\"status\":\"Investigating\"}" >/dev/null
+expect 409 not-new "Alice Phone" "$alice_phone" DELETE "/MediaReports/Report/Mine/$alice_report"
+expect 204 "" "Alice Phone" "$alice_phone" DELETE "/MediaReports/Report/Mine/$audio_report"
+
+echo "== the admin closes the issue; the notice reaches alice's phone"
+ok "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$issue" '{"status":"Fixed","notes":"Secret admin note: re-encoded."}' >/dev/null
+deadline=$((SECONDS + 30))
+until [[ -f "$work/results/notices.json" ]]; do
+  (( SECONDS < deadline )) || fail "no DisplayMessage arrived on alice's websocket"
+  sleep 1
+done
+ok "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$issue" '{"status":"Duplicate"}' >/dev/null
+sleep 5
+ok "Alice Phone" "$alice_phone" GET /MediaReports/Report/Mine >"$work/results/mine-after.json"
+ok "Alice Phone" "$alice_phone" GET "/MediaReports/Report/Mine/$alice_report" >"$work/results/mine-detail.json"
+ok "Alice Phone" "$alice_phone" GET /MediaReports/Report/Mine >"$work/results/mine-read.json"
+ok "Bob Laptop" "$bob" GET /MediaReports/Report/Mine >"$work/results/bob-mine.json"
+py - "$work/results" <<'PY' || fail "My Reports or the notice is wrong"
+import json, os, sys
+r = sys.argv[1]
+load = lambda n: json.load(open(os.path.join(r, n)))
+title = load("context.json")["Name"]
+before, after, detail, read, bob = (load(n) for n in ("mine-before.json", "mine-after.json", "mine-detail.json", "mine-read.json", "bob-mine.json"))
+assert [x["ReasonLabel"] for x in before["Reports"]] == ["Audio problem", "Stutter or jitter"] and before["Unread"] == 0, before
+assert len(after["Reports"]) == 1 and after["Unread"] == 1 and after["Reports"][0]["Unread"], after
+assert after["Reports"][0]["StatusLabel"] == "Duplicate", after
+assert [h["Label"] for h in detail["History"]] == ["Reported", "Being looked at", "Fixed", "Duplicate"], detail["History"]
+assert detail["Note"] == "keeps jumping back" and detail.get("Device") == "Living Room TV" and detail["CanWithdraw"] is False, detail
+assert read["Unread"] == 0 and not read["Reports"][0]["Unread"], read
+assert bob["Unread"] == 1 and bob["Reports"][0]["StatusLabel"] == "Duplicate", bob
+notices = load("notices.json")
+assert len(notices) == 1, notices
+n = notices[0]
+assert n["Header"] == "Media Reports" and n["Text"] == f"Your report on {title} is Fixed." and str(n.get("TimeoutMs")) == "8000", n
+for name in ("mine-before.json", "mine-after.json", "mine-detail.json", "mine-read.json", "notices.json"):
+    text = open(os.path.join(r, name)).read().lower()
+    for bad in ("secret", "re-encoded", "bob", "/media/", ".mkv", "remoteendpoint", "127.0.0.1", "172."):
+        assert bad not in text, (name, bad)
+print(f"my reports: listed, opened, withdrawn; one toast '{n['Text']}' (8000 ms); nothing private in any answer")
 PY
 
 echo "PASS: filing reports on $image"

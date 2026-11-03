@@ -180,13 +180,15 @@ public sealed class ReportStore
     /// <param name="issueIds">The issues.</param>
     /// <param name="status">The new status.</param>
     /// <param name="actorUserId">The admin.</param>
+    /// <param name="closed">Receives the issues this change closed, when every issue was set.</param>
     /// <returns>The refused issues with why; empty when every issue was set.</returns>
-    public IReadOnlyList<(long IssueId, StatusChangeResult Result)> SetStatuses(IReadOnlyCollection<long> issueIds, IssueStatus status, Guid actorUserId)
+    public IReadOnlyList<(long IssueId, StatusChangeResult Result)> SetStatuses(IReadOnlyCollection<long> issueIds, IssueStatus status, Guid actorUserId, ICollection<long>? closed = null)
     {
         var now = Now();
         using var connection = _db.OpenConnection();
         using var transaction = Transaction.Begin(connection, immediate: true);
         var refused = new List<(long, StatusChangeResult)>();
+        var closing = new List<long>();
         foreach (var id in issueIds.Distinct())
         {
             var result = SetStatus(connection, id, status, actorUserId, now, null);
@@ -194,11 +196,19 @@ public sealed class ReportStore
             {
                 refused.Add((id, result));
             }
+            else if (result.Closed)
+            {
+                closing.Add(id);
+            }
         }
 
         if (refused.Count == 0)
         {
             transaction.Commit();
+            foreach (var id in closing)
+            {
+                closed?.Add(id);
+            }
         }
 
         return refused;
@@ -481,6 +491,37 @@ public sealed class ReportStore
     }
 
     /// <summary>
+    /// Gets a reporter's own reports, newest first, with their issue's status and when it last changed.
+    /// </summary>
+    /// <param name="userId">The reporter.</param>
+    /// <returns>The reports.</returns>
+    public IReadOnlyList<ReporterReport> GetReporterReports(Guid userId)
+    {
+        using var connection = _db.OpenConnection();
+        return Rows(
+            connection,
+            """
+            SELECT r.*, i.status AS issue_status,
+                (SELECT MAX(e.at) FROM event e WHERE e.issue_id = r.issue_id AND e.kind = 'status changed') AS status_changed_at
+            FROM report r JOIN issue i ON i.id = r.issue_id
+            WHERE r.reporter_user_id = $user
+            ORDER BY r.created_at DESC, r.id DESC
+            """,
+            r => new ReporterReport(ReadReport(r), Enum.Parse<IssueStatus>(r.GetString(r.GetOrdinal("issue_status"))), ParseTime(Text(r, "status_changed_at"))),
+            ("$user", Id(userId)));
+    }
+
+    /// <summary>
+    /// Records now as when the reporter last saw their report's status.
+    /// </summary>
+    /// <param name="reportId">The report.</param>
+    public void MarkReporterSeen(long reportId)
+    {
+        using var connection = _db.OpenConnection();
+        Execute(connection, "UPDATE report SET reporter_seen_at = $now WHERE id = $id", ("$now", Now()), ("$id", reportId));
+    }
+
+    /// <summary>
     /// Gets how many reports are stored.
     /// </summary>
     /// <returns>The count.</returns>
@@ -587,7 +628,7 @@ public sealed class ReportStore
 
         Execute(connection, "UPDATE issue SET status = $status, closed_at = $closed, updated_at = $now WHERE id = $id", ("$status", status.ToString()), ("$closed", closedAt), ("$now", now), ("$id", issueId));
         AddEvent(connection, now, issueId, null, actorUserId, "status changed", detail ?? $"{current.Status.DisplayName()} → {status.DisplayName()}");
-        return new StatusChangeResult(StatusChange.Changed);
+        return new StatusChangeResult(StatusChange.Changed, Closed: current.ClosedAt is null && closedAt is not null);
     }
 
     private static void AddEvent(SqliteConnection connection, string at, long? issueId, long? reportId, Guid? actor, string kind, string? detail)

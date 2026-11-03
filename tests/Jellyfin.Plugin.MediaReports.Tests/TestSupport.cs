@@ -17,6 +17,8 @@ internal sealed class ListLogger<T> : ILogger<T>
 {
     public List<string> Errors { get; } = [];
 
+    public List<string> Warnings { get; } = [];
+
     public IDisposable? BeginScope<TState>(TState state)
         where TState : notnull => null;
 
@@ -27,6 +29,10 @@ internal sealed class ListLogger<T> : ILogger<T>
         if (logLevel >= LogLevel.Error)
         {
             Errors.Add(formatter(state, exception));
+        }
+        else if (logLevel == LogLevel.Warning)
+        {
+            Warnings.Add(formatter(state, exception));
         }
     }
 }

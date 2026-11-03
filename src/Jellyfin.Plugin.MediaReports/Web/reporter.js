@@ -192,6 +192,8 @@
     function placeAll() {
         try {
             placeMenuCount(false);
+            refreshUnread(false);
+            placeEntries();
             var i;
             var pages = document.querySelectorAll('.mainDetailButtons .btnUserRating');
             for (i = 0; i < pages.length; i++) {
@@ -226,6 +228,7 @@
         // Spacing uses margins, not flex gap, which older webOS browsers lack.
         + '.mediaReportsHeader{display:flex;align-items:flex-start;justify-content:space-between;}'
         + '.mediaReportsHeading{margin:0;font-size:1.4em;font-weight:500;}'
+        + '.mediaReportsHeadingRow{display:flex;align-items:center;}'
         + '.mediaReportsTitle{margin:4px 0 0;color:rgba(255,255,255,.7);}'
         + '.mediaReportsClose{margin-left:16px;background:none;border:0;color:inherit;cursor:pointer;padding:4px;border-radius:50%;}'
         + '.mediaReportsLabel{margin:24px 0 8px;font-weight:500;}'
@@ -271,7 +274,47 @@
         + '.mediaReportsDialog.mr-remote *:focus{outline:none;background:#00a4dc;border-color:#00a4dc;color:rgba(0,0,0,.87);}'
         + '.mediaReportsDialog.mr-remote .mediaReportsReason:focus:before{border-color:rgba(0,0,0,.87);}'
         + '.mediaReportsDialog.mr-remote .mediaReportsReason[aria-pressed=true]:focus:before{background:rgba(0,0,0,.87);box-shadow:inset 0 0 0 3px #00a4dc;}'
-        + '.mediaReportsDialog :focus-visible{outline:2px solid #00a4dc;outline-offset:2px;}';
+        + '.mediaReportsDialog :focus-visible{outline:2px solid #00a4dc;outline-offset:2px;}'
+        // My Reports: rows with an unread dot and a status pill, the detail, and Withdraw.
+        + '.mediaReportsList{list-style:none;margin:16px 0 0;padding:0;}'
+        + '.mediaReportsRow{display:flex;align-items:center;box-sizing:border-box;width:100%;min-height:64px;margin:0 0 8px;padding:12px 16px;'
+        + 'background:rgba(255,255,255,.05);border:0;border-radius:4px;color:inherit;font:inherit;text-align:left;cursor:pointer;}'
+        + '.mediaReportsRow:hover{background:rgba(255,255,255,.1);}'
+        + '.mediaReportsUnreadDot{flex:none;width:8px;height:8px;margin-right:12px;border-radius:50%;background:#00a4dc;}'
+        + '.mediaReportsRowText{flex:1;min-width:0;}'
+        + '.mediaReportsRow:not(.mr-unread) .mediaReportsRowText{margin-left:20px;}'
+        + '.mediaReportsRowTitle{display:block;margin:0;font-size:1em;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}'
+        + '.mr-unread .mediaReportsRowTitle{font-weight:700;}'
+        + '.mediaReportsRowMeta{display:block;margin-top:2px;font-size:.85em;color:rgba(255,255,255,.6);}'
+        + '.mediaReportsPill{flex:none;margin-left:12px;padding:3px 10px;border-radius:12px;font-size:.8em;font-weight:500;white-space:nowrap;}'
+        + '.mediaReportsPill.mr-new{background:rgba(0,164,220,.18);color:#4fc3ec;}'
+        + '.mediaReportsPill.mr-looking{background:rgba(242,176,30,.18);color:#f5c451;}'
+        + '.mediaReportsPill.mr-fixed{background:rgba(102,187,106,.18);color:#8fd193;}'
+        + '.mediaReportsPill.mr-closed{background:rgba(255,255,255,.1);color:rgba(255,255,255,.75);}'
+        + '.mediaReportsEmpty{margin:24px 0 0;font-size:1.1em;font-weight:500;}'
+        + '.mediaReportsEmptyHint{margin:8px 0 0;color:rgba(255,255,255,.7);}'
+        + '.mediaReportsFootnote{margin:16px 0 0;font-size:.85em;color:rgba(255,255,255,.6);}'
+        + '.mediaReportsBack{display:inline-flex;align-items:center;justify-content:center;margin:0 8px 0 -6px;padding:4px;background:none;border:0;'
+        + 'border-radius:50%;color:inherit;cursor:pointer;}'
+        + '.mediaReportsBack:hover{background:rgba(255,255,255,.1);}'
+        + '.mediaReportsDetailHead{display:flex;align-items:center;justify-content:space-between;margin-top:8px;}'
+        + '.mediaReportsDetailHead .mediaReportsRowTitle{font-size:1.2em;font-weight:500;white-space:normal;}'
+        + '.mediaReportsFacts{margin:8px 0 0;}'
+        + '.mediaReportsFacts dt{margin:16px 0 2px;font-size:.85em;color:rgba(255,255,255,.6);}'
+        + '.mediaReportsFacts dd{margin:0;white-space:pre-wrap;word-wrap:break-word;}'
+        + '.mediaReportsHistory{list-style:none;margin:0 0 0 5px;padding:0 0 0 16px;border-left:2px solid rgba(255,255,255,.2);}'
+        + '.mediaReportsHistory li{position:relative;padding:4px 0;}'
+        + '.mediaReportsHistory li:before{content:"";position:absolute;left:-23px;top:50%;width:12px;height:12px;margin-top:-6px;border-radius:50%;'
+        + 'background:#202020;box-shadow:inset 0 0 0 2px rgba(255,255,255,.6);}'
+        + '.mediaReportsHistory li:last-child:before{background:#00a4dc;box-shadow:none;}'
+        + '.mediaReportsWhen{margin-left:8px;font-size:.85em;color:rgba(255,255,255,.6);}'
+        + '.mediaReportsWithdraw{margin-top:24px;min-height:44px;padding:0 20px;background:transparent;border:1px solid rgba(255,255,255,.3);'
+        + 'border-radius:4px;color:inherit;font:inherit;cursor:pointer;}'
+        + '.mediaReportsConfirm{margin-top:24px;padding:16px;background:rgba(255,255,255,.06);border-radius:4px;}'
+        + '.mediaReportsConfirmText{margin:0;font-weight:500;}'
+        + '.mediaReportsConfirm .mediaReportsActions{margin-top:16px;}'
+        + '.mediaReportsDanger{flex:1;min-height:44px;border:0;border-radius:4px;background:#d32f2f;color:#fff;font:inherit;font-weight:500;cursor:pointer;}'
+        + '.mediaReportsMine button:disabled{opacity:.6;cursor:default;}';
 
     var open = null;
 
@@ -290,7 +333,11 @@
         if (!api) {
             return Promise.reject({ status: 0 });
         }
-        var request = { type: method, url: api.getUrl(path, query || {}), dataType: 'json' };
+        // A DELETE answers 204 with no body to parse.
+        var request = { type: method, url: api.getUrl(path, query || {}) };
+        if (method !== 'DELETE') {
+            request.dataType = 'json';
+        }
         if (body) {
             request.data = JSON.stringify(body);
             request.contentType = 'application/json';
@@ -404,28 +451,35 @@
         if (state.returnTo && document.body.contains(state.returnTo)) {
             state.returnTo.focus();
         }
+        if (state.onClose) {
+            state.onClose();
+        }
     }
 
-    function openDialog(itemId, fromPlayer) {
+    // Opens an empty dialog in the given layout, with its heading, keys and focus trap.
+    // BACK and ESC call state.onBack first when it is set and returns true.
+    function openFrame(state, heading, extraClass) {
         close();
         addStyles();
-        // The player keeps the video in view with a side panel, also in the TV layout.
-        var tv = isTv();
-        var layout = fromPlayer ? 'panel' : tv ? 'tv' : window.innerWidth < 600 ? 'phone' : 'desktop';
-        var state = { itemId: itemId, fromPlayer: fromPlayer, layout: layout, tv: tv, reason: null, sending: false, timer: 0, returnTo: document.activeElement };
+        var layout = state.layout;
+        var tv = state.tv;
+        state.timer = 0;
+        state.returnTo = document.activeElement;
         open = state;
 
         state.backdrop = el('div', 'mediaReportsBackdrop' + (layout === 'panel' ? ' mr-clear' : ''));
         state.backdrop.addEventListener('click', close);
-        var dialog = el('div', 'mediaReportsDialog mr-' + layout + (tv ? ' mr-remote' : ''));
+        var dialog = el('div', 'mediaReportsDialog mr-' + layout + (tv ? ' mr-remote' : '') + (extraClass ? ' ' + extraClass : ''));
         dialog.setAttribute('role', 'dialog');
         dialog.setAttribute('aria-modal', 'true');
-        dialog.setAttribute('aria-label', LABEL);
+        dialog.setAttribute('aria-label', heading);
         state.dialog = dialog;
 
         var header = el('div', 'mediaReportsHeader');
         var titles = el('div');
-        titles.appendChild(el('h2', 'mediaReportsHeading', LABEL));
+        state.headingRow = el('div', 'mediaReportsHeadingRow');
+        state.headingRow.appendChild(el('h2', 'mediaReportsHeading', heading));
+        titles.appendChild(state.headingRow);
         state.title = el('p', 'mediaReportsTitle', '');
         titles.appendChild(state.title);
         header.appendChild(titles);
@@ -454,7 +508,9 @@
             if (key === 'Escape' || event.keyCode === 461 || key === 'GoBack' || key === 'Backspace' && !typing) {
                 event.preventDefault();
                 event.stopPropagation();
-                close();
+                if (!state.onBack || !state.onBack()) {
+                    close();
+                }
                 return;
             }
             if (key === 'Tab') {
@@ -477,6 +533,14 @@
         document.body.appendChild(dialog);
         dialog.setAttribute('tabindex', '-1');
         dialog.focus();
+        return state;
+    }
+
+    function openDialog(itemId, fromPlayer) {
+        // The player keeps the video in view with a side panel, also in the TV layout.
+        var tv = isTv();
+        var layout = fromPlayer ? 'panel' : tv ? 'tv' : window.innerWidth < 600 ? 'phone' : 'desktop';
+        var state = openFrame({ itemId: itemId, fromPlayer: fromPlayer, layout: layout, tv: tv, reason: null, sending: false }, LABEL);
 
         call('GET', 'MediaReports/Report/Context', { itemId: itemId }).then(function (context) {
             if (open === state) {
@@ -662,6 +726,417 @@
         ok.focus();
     }
 
+    // ---- My Reports -----------------------------------------------------------------------
+
+    var MINE_LABEL = 'My Reports';
+    var PILLS = { New: 'mr-new', Investigating: 'mr-looking', ReplacedVerify: 'mr-looking', Fixed: 'mr-fixed' };
+    var DOT = 'mediaReportsDot';
+    var USER_BUTTONS = 'button[aria-controls=app-user-menu], .headerUserButton';
+    var SETTINGS_ITEM = 'a[role=menuitem][href="#/mypreferencesmenu"]';
+
+    // The caller's unread count: read when jellyfin-web loads, for each signed-in user, and
+    // again whenever My Reports closes.
+    var unread = { user: null, value: null, loading: false };
+
+    function refreshUnread(force) {
+        var api = client();
+        if (!api || unread.loading) {
+            return;
+        }
+        var user = api.getCurrentUserId();
+        if (!force && unread.user === user && unread.value !== null) {
+            return;
+        }
+        unread.loading = true;
+        call('GET', 'MediaReports/Report/Mine').then(function (mine) {
+            unread = { user: user, value: mine.Unread || 0, loading: false };
+            placeEntries();
+        }, function () {
+            unread = { user: user, value: 0, loading: false };
+        });
+    }
+
+    function shortDay(iso) {
+        var then = new Date(iso);
+        var phrase = dayOf(iso);
+        if (phrase === 'today' || phrase === 'yesterday') {
+            return phrase.charAt(0).toUpperCase() + phrase.slice(1);
+        }
+        return then.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    }
+
+    function pill(status, label) {
+        return el('span', 'mediaReportsPill ' + (PILLS[status] || 'mr-closed'), label);
+    }
+
+    function opensOnEnter(element, action) {
+        element.addEventListener('click', function (event) {
+            event.preventDefault();
+            action();
+        });
+        element.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                action();
+            }
+        });
+    }
+
+    // The entry after Settings in the User Menu, the row after Profile in Settings where
+    // there is no User Menu (the TV layout), and the dot on the user button.
+    function placeEntries() {
+        var count = unread.value || 0;
+        var i;
+        var buttons = document.querySelectorAll(USER_BUTTONS);
+        for (i = 0; i < buttons.length; i++) {
+            var dot = buttons[i].querySelector('.' + DOT);
+            if (count && !dot) {
+                // On the button's corner above the user's picture, with a ring in the header's
+                // colour so it stands apart from an avatar that is itself blue. The TV layout's
+                // button is a circle that clips its corners, so it lets the dot overflow.
+                dot = el('span', DOT);
+                dot.setAttribute('aria-hidden', 'true');
+                dot.setAttribute('style', 'position:absolute;top:2px;right:2px;z-index:2;width:10px;height:10px;border-radius:50%;background:#00a4dc;'
+                    + 'box-shadow:0 0 0 2px ' + backgroundBehind(buttons[i]) + ';pointer-events:none');
+                if (window.getComputedStyle(buttons[i]).position === 'static') {
+                    buttons[i].style.position = 'relative';
+                }
+                dot.setAttribute('data-overflow', buttons[i].style.overflow);
+                buttons[i].style.overflow = 'visible';
+                buttons[i].appendChild(dot);
+            } else if (!count && dot) {
+                buttons[i].style.overflow = dot.getAttribute('data-overflow') || '';
+                dot.parentNode.removeChild(dot);
+            }
+        }
+
+        var settings = document.querySelector(SETTINGS_ITEM);
+        if (settings) {
+            placeMenuItem(settings, count);
+        }
+
+        var profile = document.querySelector('.page:not(.hide) a.lnkUserProfile');
+        if (profile && (isTv() || !document.querySelector('button[aria-controls=app-user-menu]'))) {
+            placeSettingsRow(profile, count);
+        }
+    }
+
+    // The first solid background behind an element; a see-through header doesn't count.
+    function backgroundBehind(element) {
+        for (var node = element; node && node.nodeType === 1; node = node.parentNode) {
+            var colour = window.getComputedStyle(node).backgroundColor;
+            if (/^rgb\(/.test(colour)) {
+                return colour;
+            }
+        }
+        return '#101010';
+    }
+
+    function placeMenuItem(settings, count) {
+        var item = settings.nextElementSibling;
+        if (!item || (' ' + item.className + ' ').indexOf(' mediaReportsMenuItem ') === -1) {
+            var stray = settings.parentNode.querySelector('.mediaReportsMenuItem');
+            if (stray) {
+                stray.parentNode.removeChild(stray);
+            }
+            // A copy of Settings keeps the menu's own look, with our icon, label and action.
+            item = settings.cloneNode(true);
+            item.removeAttribute('href');
+            item.removeAttribute('id');
+            item.className += ' mediaReportsMenuItem';
+            item.setAttribute('tabindex', '-1');
+            var icon = item.querySelector('svg');
+            if (icon) {
+                var flag = el('span', 'material-icons flag');
+                flag.setAttribute('aria-hidden', 'true');
+                flag.setAttribute('style', 'font-size:24px');
+                icon.parentNode.replaceChild(flag, icon);
+            }
+            var text = item.querySelector('.MuiListItemText-primary') || item;
+            text.textContent = MINE_LABEL;
+            opensOnEnter(item, function () {
+                // Close the User Menu the way a key would and open My Reports straight away.
+                // The menu hands focus back to the user button once its closing animation
+                // ends (a closed menu stays in the page, hidden), so My Reports takes focus
+                // back then, and returns it to the user button when it closes.
+                var userButton = document.querySelector('button[aria-controls=app-user-menu]');
+                item.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+                openMine();
+                var state = open;
+                state.returnTo = userButton;
+                var tries = 0;
+                var whenGone = function () {
+                    if (document.body.contains(item) && window.getComputedStyle(item).visibility !== 'hidden' && ++tries < 40) {
+                        window.setTimeout(whenGone, 50);
+                        return;
+                    }
+                    window.setTimeout(function () {
+                        if (open === state && !state.dialog.contains(document.activeElement)) {
+                            (focusables(state.body)[0] || focusables(state.dialog)[0] || state.dialog).focus();
+                        }
+                    }, 0);
+                };
+                window.setTimeout(whenGone, 50);
+            });
+            settings.parentNode.insertBefore(item, settings.nextSibling);
+        }
+        var badge = item.querySelector('.mediaReportsMenuItemCount');
+        if (count && !badge) {
+            badge = el('span', 'mediaReportsMenuItemCount');
+            badge.setAttribute('style', 'margin-left:auto;padding-left:16px;min-width:22px;height:20px;box-sizing:content-box;display:inline-flex;align-items:center;justify-content:center');
+            var number = el('span');
+            number.setAttribute('style', 'min-width:22px;height:20px;border-radius:10px;background:#00a4dc;color:rgba(0,0,0,.87);font-size:12px;font-weight:700;'
+                + 'display:inline-flex;align-items:center;justify-content:center;padding:0 6px;box-sizing:border-box');
+            badge.appendChild(number);
+            item.appendChild(badge);
+        } else if (!count && badge) {
+            badge.parentNode.removeChild(badge);
+            badge = null;
+        }
+        if (badge && badge.textContent !== String(count)) {
+            badge.firstChild.textContent = String(count);
+        }
+        item.setAttribute('aria-label', count ? MINE_LABEL + ', ' + count + ' updated' : MINE_LABEL);
+    }
+
+    function placeSettingsRow(profile, count) {
+        var row = profile.nextElementSibling;
+        if (!row || (' ' + row.className + ' ').indexOf(' mediaReportsSettingsRow ') === -1) {
+            row = el('a', 'emby-button listItem-border show-focus mediaReportsSettingsRow');
+            row.href = '#';
+            row.setAttribute('style', 'display:block;margin:0;padding:0');
+            var item = el('div', 'listItem');
+            var icon = el('span', 'material-icons listItemIcon listItemIcon-transparent flag');
+            icon.setAttribute('aria-hidden', 'true');
+            item.appendChild(icon);
+            var body = el('div', 'listItemBody');
+            var label = el('div', 'listItemBodyText', MINE_LABEL);
+            label.setAttribute('style', 'display:flex;align-items:center');
+            body.appendChild(label);
+            item.appendChild(body);
+            row.appendChild(item);
+            opensOnEnter(row, openMine);
+            profile.parentNode.insertBefore(row, profile.nextSibling);
+        }
+        // The count is the same blue pill as the User Menu's, on the label's line.
+        var line = row.querySelector('.listItemBodyText');
+        var badge = row.querySelector('.mediaReportsSettingsRowCount');
+        var text = count + ' updated';
+        if (count && !badge) {
+            badge = el('span', 'mediaReportsSettingsRowCount');
+            badge.setAttribute('style', 'margin-left:16px;padding:2px 10px;border-radius:12px;background:#00a4dc;color:rgba(0,0,0,.87);'
+                + 'font-size:.8em;font-weight:700;line-height:1.4;white-space:nowrap');
+            line.appendChild(badge);
+        } else if (!count && badge) {
+            badge.parentNode.removeChild(badge);
+            badge = null;
+        }
+        if (badge && badge.textContent !== text) {
+            badge.textContent = text;
+        }
+        row.setAttribute('aria-label', count ? MINE_LABEL + ', ' + text : MINE_LABEL);
+    }
+
+    function openMine() {
+        var tv = isTv();
+        var state = openFrame({ layout: tv ? 'tv' : window.innerWidth < 600 ? 'phone' : 'desktop', tv: tv, mine: null }, MINE_LABEL, 'mediaReportsMine');
+        state.onClose = function () {
+            refreshUnread(true);
+        };
+        state.title.parentNode.removeChild(state.title);
+        state.body.className = 'mediaReportsMineBody';
+        loadMine(state, null);
+    }
+
+    function loadMine(state, focusId) {
+        call('GET', 'MediaReports/Report/Mine').then(function (mine) {
+            if (open === state) {
+                state.mine = mine;
+                renderMine(state, focusId);
+            }
+        }, function () {
+            if (open === state) {
+                state.body.innerHTML = '';
+                state.body.appendChild(el('p', 'mediaReportsError', "Couldn't reach the server. Try again in a moment."));
+            }
+        });
+    }
+
+    function renderMine(state, focusId) {
+        state.onBack = null;
+        var headerBack = state.headingRow.querySelector('.mediaReportsBack');
+        if (headerBack) {
+            state.headingRow.removeChild(headerBack);
+        }
+        var body = state.body;
+        body.innerHTML = '';
+        var reports = state.mine.Reports || [];
+        if (!reports.length) {
+            body.appendChild(el('p', 'mediaReportsEmpty', "You haven't reported anything."));
+            body.appendChild(el('p', 'mediaReportsEmptyHint', "When something won't play right, choose the flag button after the favourite button on the title's page, or in the player's controls."));
+        }
+        var list = el('ul', 'mediaReportsList');
+        var focus = null;
+        reports.forEach(function (report) {
+            var li = el('li');
+            var row = el('button', 'mediaReportsRow' + (report.Unread ? ' mr-unread' : ''));
+            row.type = 'button';
+            if (report.Unread) {
+                var dot = el('span', 'mediaReportsUnreadDot');
+                dot.setAttribute('aria-hidden', 'true');
+                row.appendChild(dot);
+            }
+            var text = el('span', 'mediaReportsRowText');
+            text.appendChild(el('span', 'mediaReportsRowTitle', report.Title));
+            text.appendChild(el('span', 'mediaReportsRowMeta', report.ReasonLabel + ' · ' + shortDay(report.CreatedAt)));
+            row.appendChild(text);
+            row.appendChild(pill(report.Status, report.StatusLabel));
+            row.setAttribute('aria-label', report.Title + ', ' + report.ReasonLabel + ', ' + report.StatusLabel + (report.Unread ? ', updated' : ''));
+            row.addEventListener('click', function () {
+                openReport(state, report);
+            });
+            if (report.Id === focusId) {
+                focus = row;
+            }
+            li.appendChild(row);
+            list.appendChild(li);
+        });
+        body.appendChild(list);
+        body.appendChild(el('p', 'mediaReportsFootnote', 'Closed reports are removed a year after they close.'));
+        (focus || focusables(list)[0] || focusables(state.dialog)[0] || state.dialog).focus();
+    }
+
+    function openReport(state, report) {
+        state.body.innerHTML = '';
+        state.body.appendChild(el('p', 'mediaReportsHint', 'Loading…'));
+        call('GET', 'MediaReports/Report/Mine/' + report.Id).then(function (detail) {
+            if (open !== state) {
+                return;
+            }
+            // Opening it marked it read on the server.
+            if (report.Unread) {
+                report.Unread = false;
+                state.mine.Unread = Math.max(0, (state.mine.Unread || 0) - 1);
+            }
+            renderReport(state, detail);
+        }, function () {
+            if (open === state) {
+                renderMine(state, report.Id);
+            }
+        });
+    }
+
+    function renderReport(state, detail) {
+        var back = function () {
+            renderMine(state, detail.Id);
+            return true;
+        };
+        state.onBack = back;
+        var body = state.body;
+        body.innerHTML = '';
+        var view = el('div', 'mediaReportsDetail');
+        // Back sits in the header before the heading; on TV the remote's BACK does it.
+        if (!state.tv && !state.headingRow.querySelector('.mediaReportsBack')) {
+            var backButton = el('button', 'mediaReportsBack');
+            backButton.type = 'button';
+            backButton.setAttribute('aria-label', 'Back to My Reports');
+            backButton.title = 'Back';
+            var arrow = el('span', 'material-icons arrow_back');
+            arrow.setAttribute('aria-hidden', 'true');
+            backButton.appendChild(arrow);
+            backButton.addEventListener('click', back);
+            state.headingRow.insertBefore(backButton, state.headingRow.firstChild);
+        }
+        var head = el('div', 'mediaReportsDetailHead');
+        head.appendChild(el('h3', 'mediaReportsRowTitle', detail.Title));
+        head.appendChild(pill(detail.Status, detail.StatusLabel));
+        view.appendChild(head);
+
+        var facts = el('dl', 'mediaReportsFacts');
+        var fact = function (name, value) {
+            if (value) {
+                facts.appendChild(el('dt', '', name));
+                facts.appendChild(el('dd', '', value));
+            }
+        };
+        fact('Reason', detail.ReasonLabel);
+        fact('Your note', detail.Note);
+        fact('Watched on', detail.Device);
+        view.appendChild(facts);
+
+        view.appendChild(el('p', 'mediaReportsLabel', 'History'));
+        var history = el('ul', 'mediaReportsHistory');
+        (detail.History || []).forEach(function (step) {
+            var li = el('li');
+            li.appendChild(el('span', 'mediaReportsStep', step.Label));
+            li.appendChild(el('span', 'mediaReportsWhen', shortDay(step.At)));
+            history.appendChild(li);
+        });
+        view.appendChild(history);
+
+        // Withdrawing needs a pointer: the TV only reads.
+        if (detail.CanWithdraw && !state.tv) {
+            var actions = el('div', 'mediaReportsWithdrawArea');
+            var withdraw = el('button', 'mediaReportsWithdraw', 'Withdraw report');
+            withdraw.type = 'button';
+            withdraw.addEventListener('click', function () {
+                confirmWithdraw(state, detail, actions, withdraw);
+            });
+            actions.appendChild(withdraw);
+            view.appendChild(actions);
+        }
+        body.appendChild(view);
+        (focusables(view)[0] || state.dialog).focus();
+    }
+
+    function confirmWithdraw(state, detail, actions, withdraw) {
+        withdraw.style.display = 'none';
+        var box = el('div', 'mediaReportsConfirm');
+        box.setAttribute('role', 'alertdialog');
+        box.setAttribute('aria-label', 'Withdraw this report?');
+        box.appendChild(el('p', 'mediaReportsConfirmText', 'Withdraw this report?'));
+        var error = el('p', 'mediaReportsError');
+        error.style.display = 'none';
+        error.setAttribute('role', 'alert');
+        box.appendChild(error);
+        var buttons = el('div', 'mediaReportsActions');
+        var keep = el('button', 'mediaReportsCancel mediaReportsKeep', 'Keep it');
+        keep.type = 'button';
+        var confirm = el('button', 'mediaReportsDanger mediaReportsWithdrawConfirm', 'Withdraw');
+        confirm.type = 'button';
+        buttons.appendChild(keep);
+        buttons.appendChild(confirm);
+        box.appendChild(buttons);
+        actions.appendChild(box);
+        keep.addEventListener('click', function () {
+            actions.removeChild(box);
+            withdraw.style.display = '';
+            withdraw.focus();
+        });
+        confirm.addEventListener('click', function () {
+            confirm.disabled = true;
+            keep.disabled = true;
+            call('DELETE', 'MediaReports/Report/Mine/' + detail.Id).then(function () {
+                if (open === state) {
+                    loadMine(state, null);
+                }
+            }, function (failure) {
+                errorCode(failure).then(function (code) {
+                    if (open !== state) {
+                        return;
+                    }
+                    confirm.disabled = false;
+                    keep.disabled = false;
+                    error.textContent = code === 'not-new'
+                        ? "It's already being looked at, so it can't be withdrawn."
+                        : "Couldn't reach the server, so the report wasn't withdrawn. Try again.";
+                    error.style.display = '';
+                });
+            });
+        });
+        keep.focus();
+    }
+
     // ---- Start --------------------------------------------------------------------------
 
     function start() {
@@ -693,7 +1168,7 @@
         placeAll();
     }
 
-    window.MediaReports = { placeAll: placeAll, report: report, close: close };
+    window.MediaReports = { placeAll: placeAll, report: report, close: close, myReports: openMine };
 
     if (typeof window.MutationObserver === 'function') {
         if (document.body) {

@@ -140,8 +140,58 @@
         }
     }
 
+    // ---- The Dashboard menu count ----------------------------------------------------------
+
+    var MENU_LINK = 'a[href$="configurationpage?name=mediareports"]';
+    var MENU_COUNT = 'mediaReportsMenuCount';
+    var menuCount = { value: null, at: 0, loading: false, link: null };
+
+    // The count of issues new to this admin, beside the Media Reports entry in the Dashboard
+    // menu. Only admins see the entry, so only they ask for the count. It is asked again each
+    // time the Dashboard draws its menu, and at most once a minute while it stays open.
+    function placeMenuCount(refresh) {
+        var link = document.querySelector(MENU_LINK);
+        if (!link || !client()) {
+            return;
+        }
+        if (refresh || link !== menuCount.link || menuCount.value === null || Date.now() - menuCount.at > 60000) {
+            menuCount.link = link;
+            if (!menuCount.loading) {
+                menuCount.loading = true;
+                call('GET', 'MediaReports/Admin/Summary').then(function (summary) {
+                    menuCount = { value: summary.New, at: Date.now(), loading: false, link: link };
+                    placeMenuCount(false);
+                }, function () {
+                    menuCount = { value: 0, at: Date.now(), loading: false, link: link };
+                });
+            }
+            if (menuCount.value === null) {
+                return;
+            }
+        }
+        var badge = link.querySelector('.' + MENU_COUNT);
+        if (!menuCount.value) {
+            if (badge) {
+                badge.parentNode.removeChild(badge);
+            }
+            return;
+        }
+        if (!badge) {
+            badge = el('span', MENU_COUNT);
+            badge.setAttribute('style', 'margin-left:auto;min-width:22px;height:20px;border-radius:10px;background:#00a4dc;color:rgba(0,0,0,.87);'
+                + 'font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;padding:0 6px;box-sizing:border-box');
+            link.appendChild(badge);
+        }
+        var text = String(menuCount.value);
+        if (badge.textContent !== text) {
+            badge.textContent = text;
+            badge.setAttribute('aria-label', menuCount.value + ' new');
+        }
+    }
+
     function placeAll() {
         try {
+            placeMenuCount(false);
             var i;
             var pages = document.querySelectorAll('.mainDetailButtons .btnUserRating');
             for (i = 0; i < pages.length; i++) {
@@ -629,6 +679,9 @@
         document.addEventListener('viewshow', function () {
             close();
             placeAll();
+        });
+        document.addEventListener('mediareports:seen', function () {
+            placeMenuCount(true);
         });
         document.addEventListener('mediareports:report', function (event) {
             try {

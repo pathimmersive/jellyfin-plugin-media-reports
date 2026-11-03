@@ -25,6 +25,8 @@
   <ItemGroup>
     <!-- The Report button script runs in jellyfin-web and is served at /MediaReports/web/reporter.js. -->
     <EmbeddedResource Include="Web/reporter.js" LogicalName="reporter.js" />
+    <EmbeddedResource Include="Web/triage.html" LogicalName="Jellyfin.Plugin.MediaReports.Web.triage.html" />
+    <EmbeddedResource Include="Web/triage.js" LogicalName="Jellyfin.Plugin.MediaReports.Web.triage.js" />
   </ItemGroup>
 
   <ItemGroup>

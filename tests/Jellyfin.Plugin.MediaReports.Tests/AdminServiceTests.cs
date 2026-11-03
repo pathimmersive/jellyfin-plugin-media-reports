@@ -313,7 +313,7 @@ public sealed class AdminServiceTests : IDisposable
         Assert.Equal(Outcome.Ok, _service.Scan(issue, _admin.Id).Outcome);
         _providers.Verify(m => m.QueueRefresh(SeasonId, It.Is<MetadataRefreshOptions>(o => o.MetadataRefreshMode == MetadataRefreshMode.Default), RefreshPriority.High), Times.Once);
         _providers.VerifyNoOtherCalls();
-        Assert.Equal(("action run", "Scan library: Season 1"), (_store.GetIssueEvents(issue)[^1].Kind, _store.GetIssueEvents(issue)[^1].Detail));
+        Assert.Equal(("action run", "Rescan: Season 1"), (_store.GetIssueEvents(issue)[^1].Kind, _store.GetIssueEvents(issue)[^1].Detail));
     }
 
     [Fact]

@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using Jellyfin.Plugin.MediaReports.Configuration;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
+using MediaBrowser.Model.Plugins;
 using MediaBrowser.Model.Serialization;
 
 namespace Jellyfin.Plugin.MediaReports;
@@ -9,8 +11,13 @@ namespace Jellyfin.Plugin.MediaReports;
 /// <summary>
 /// The Media Reports plugin.
 /// </summary>
-public class Plugin : BasePlugin<PluginConfiguration>
+public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
 {
+    /// <summary>
+    /// The name of the Media Reports page in the Dashboard, as its URL carries it.
+    /// </summary>
+    public const string PageName = "mediareports";
+
     /// <summary>
     /// The plugin's display name.
     /// </summary>
@@ -45,4 +52,25 @@ public class Plugin : BasePlugin<PluginConfiguration>
 
     /// <inheritdoc />
     public override string Description => "Report playback and media problems to the server admin.";
+
+    /// <summary>
+    /// Lists the Media Reports page under Plugins in the Dashboard menu, with its script.
+    /// </summary>
+    /// <returns>The page and its script.</returns>
+    public IEnumerable<PluginPageInfo> GetPages() =>
+    [
+        new PluginPageInfo
+        {
+            Name = PageName,
+            DisplayName = PluginName,
+            EmbeddedResourcePath = GetType().Namespace + ".Web.triage.html",
+            EnableInMainMenu = true,
+            MenuIcon = "report_problem",
+        },
+        new PluginPageInfo
+        {
+            Name = PageName + ".js",
+            EmbeddedResourcePath = GetType().Namespace + ".Web.triage.js",
+        },
+    ];
 }

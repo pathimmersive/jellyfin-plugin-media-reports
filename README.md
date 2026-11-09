@@ -1,7 +1,9 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/logo/readme-dark.svg">
-  <img alt="Media Reports: users flag it, your server spots it" src="assets/logo/readme-light.svg" width="480">
-</picture>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo/readme-dark.svg">
+    <img alt="Media Reports: users flag it, your server spots it" src="assets/logo/readme-light.svg" width="480">
+  </picture>
+</p>
 
 # Media Reports for Jellyfin
 

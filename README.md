@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/logo/readme-dark.svg">
+  <img alt="Media Reports: users flag it, your server spots it" src="assets/logo/readme-light.svg" width="480">
+</picture>
+
 # Media Reports for Jellyfin
 
 Media Reports is a Jellyfin server plugin that lets the users of a server report a problem with a movie, show, season or episode: it won't play, plays incorrectly, looks poor, stutters, or has the wrong audio or subtitles. The admin gets one place to view and work those reports. Each report will carry the playback details the server already knows, such as client, device, direct play or transcode and why, codecs and position, so the user only has to pick a reason.

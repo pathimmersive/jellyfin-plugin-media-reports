@@ -71,6 +71,9 @@ done < <(find . \( -path ./.git -o -path ./artifacts -o -name bin -o -name obj \
   -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.gif' -o -iname '*.svg' \
   -o -iname '*.ico' -o -iname '*.webp' \) -print)
 
+echo "== logo images match their SVG source"
+dotnet run scripts/render-logo.cs -- --check || fail "a logo PNG differs from its SVG source"
+
 echo "== third-party notices cover the published plugin"
 if [[ -z "$deps" ]]; then
   publish_dir="artifacts/docs-check/publish"

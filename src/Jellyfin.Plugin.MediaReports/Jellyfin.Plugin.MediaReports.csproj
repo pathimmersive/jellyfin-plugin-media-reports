@@ -31,6 +31,8 @@
 
   <ItemGroup>
     <None Include="meta.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <!-- The catalog image, made from assets/logo/catalog.svg by scripts/render-logo.cs. -->
+    <None Include="media-reports.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

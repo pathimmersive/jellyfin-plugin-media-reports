@@ -1,4 +1,4 @@
-// Media Reports page in the Dashboard: the Reports tab and one issue.
+// Media Reports page in the Dashboard: the Reports tab, one issue, and the Settings tab.
 // The tab, the issue and the list's view, grouping, filters, sort and page live in the
 // page's URL, so Back returns to the list as it was.
 
@@ -30,7 +30,9 @@ const STYLES = `
 .mrMuted{color:var(--mr-muted)}
 .mrFaint{color:var(--mr-faint);font-size:13px}
 .mrTabs{display:flex;flex-wrap:wrap;border-bottom:1px solid rgba(255,255,255,.12)}
-.mrTab{height:48px;display:inline-flex;align-items:center;padding:0 16px;color:#fff !important;text-decoration:none;font-weight:600;font-size:14px;border-bottom:2px solid var(--mr-accent)}
+.mrTab{height:48px;display:inline-flex;align-items:center;padding:0 16px;color:var(--mr-muted) !important;text-decoration:none;font-weight:600;font-size:14px;border-bottom:2px solid transparent}
+.mrTab:hover{color:#fff !important}
+.mrTab[aria-current=page]{color:#fff !important;border-bottom-color:var(--mr-accent)}
 .mrTab .mrCount{margin-left:8px;color:var(--mr-muted);font-weight:400}
 .mrTabs+.mrControls{margin-top:18px}
 .mrControls{display:flex;flex-wrap:wrap;align-items:center;margin:-6px -10px}
@@ -123,6 +125,25 @@ const STYLES = `
 .mrHistory li>span:first-child{width:8px;height:8px;border-radius:4px;background:rgba(255,255,255,.4);margin:6px 12px 0 0;flex-shrink:0}
 .mrHistory li>span:nth-child(2){flex:1}
 .mrHistory time{color:var(--mr-faint);font-size:12px;white-space:nowrap;margin-left:12px}
+.mrSettings>*+*{margin-top:20px}
+.mrReasons{list-style:none;margin:0;padding:0}
+.mrReason{display:flex;flex-wrap:wrap;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.07)}
+.mrReason>*{margin:4px 12px 4px 0}
+.mrReason input{flex:1 1 220px;min-width:0}
+.mrReason .mrUses{flex:0 0 150px;font-size:13px;color:var(--mr-faint)}
+.mrReason .mrBad{flex-basis:100%;margin-top:0}
+.mrRetired input{color:var(--mr-faint)}
+.mrIconBtn{width:36px;height:36px;border-radius:18px;border:0;background:none;color:var(--mr-text);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:0}
+.mrIconBtn:hover{background:rgba(255,255,255,.1)}
+.mrIconBtn:disabled{opacity:.3;cursor:default;background:none}
+.mrInput{height:40px;box-sizing:border-box;background:rgba(255,255,255,.08);color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:4px;padding:0 10px;font:inherit;font-size:15px}
+.mrInput:focus{outline:2px solid var(--mr-accent);outline-offset:-1px}
+.mrInput[aria-invalid=true]{border-color:#ffb4ab}
+.mrDays{width:90px;margin:0 8px}
+.mrCheck{display:flex;align-items:flex-start;font-size:15px;color:#fff;cursor:pointer}
+.mrCheck input{width:20px;height:20px;margin:1px 12px 0 0;flex-shrink:0;accent-color:var(--mr-accent)}
+.mrSave{display:flex;flex-wrap:wrap;align-items:center}
+.mrSave>*+*{margin-left:16px}
 .mrNotes{width:100%;box-sizing:border-box;min-height:96px;background:rgba(255,255,255,.08);color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:4px;padding:8px;font:inherit;font-size:14px;resize:vertical}
 @media (max-width:600px){.mrDl{grid-template-columns:110px minmax(0,1fr)}.mrHead h1,.mrIssueTitle h1{font-size:24px}}
 `;
@@ -292,10 +313,11 @@ function header(summary) {
             `${plural(summary.OpenIssues, 'open issue', 'open issues')} from ${plural(summary.Reports, 'report', 'reports')} · ${summary.New} new since you last looked`) : null);
 }
 
-function tabs(summary) {
+function tabs(summary, active) {
     return h('nav', { className: 'mrTabs', 'aria-label': 'Media Reports' },
-        h('a', { className: 'mrTab', href: pageUrl({}), 'aria-current': 'page' }, 'Reports',
-            summary ? h('span', { className: 'mrCount' }, summary.OpenIssues) : null));
+        h('a', { className: 'mrTab', href: pageUrl({}), 'aria-current': active === 'settings' ? null : 'page' }, 'Reports',
+            summary ? h('span', { className: 'mrCount' }, summary.OpenIssues) : null),
+        h('a', { className: 'mrTab mrSettingsTab', href: pageUrl({ tab: 'settings' }), 'aria-current': active === 'settings' ? 'page' : null }, 'Settings'));
 }
 
 function skeleton() {
@@ -654,6 +676,195 @@ function issuePage(params, issue, navigate) {
                 h('li', null, h('span'), h('span', null, historyLine(event)), h('time', { datetime: event.At }, stamp(event.At))))))));
 }
 
+// ---- The Settings tab -----------------------------------------------------------------
+
+// A refused save answers 400 with the field at fault, and the reason's position for a reason.
+function settingsRefusal(failure) {
+    if (failure && failure.status === 400 && typeof failure.json === 'function') {
+        return failure.json().then((body) => ({
+            code: body.Code, message: body.Message, field: body.Field, index: body.ReasonIndex === undefined ? null : body.ReasonIndex
+        }), () => null);
+    }
+    return Promise.resolve(null);
+}
+
+function exportReports(button, note) {
+    button.disabled = true;
+    note.textContent = '';
+    ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl(API + 'Export') })
+        .then((response) => response.blob().then((blob) => {
+            const match = /filename="?([^";]+)"?/.exec(response.headers.get('Content-Disposition') || '');
+            const link = h('a', { href: URL.createObjectURL(blob), download: match ? match[1] : 'media-reports-export.json', style: 'display:none' });
+            document.body.appendChild(link);
+            link.click();
+            setTimeout(() => {
+                URL.revokeObjectURL(link.href);
+                link.remove();
+            }, 1000);
+        }))
+        .catch(() => {
+            note.textContent = "The export couldn't be made. The server log has the details.";
+        })
+        .then(() => {
+            button.disabled = false;
+        });
+}
+
+function settingsPage(settings) {
+    const model = {
+        reasons: settings.Reasons.map((r) => ({ code: r.Code, label: r.Label, retired: r.Retired, reports: r.Reports })),
+        reportingEnabled: settings.ReportingEnabled,
+        days: String(settings.ReportRetentionDays)
+    };
+    let refused = null;
+    let focusAfter = null;
+
+    const list = h('ul', { className: 'mrReasons' });
+    const reasonsNote = h('p', { className: 'mrBad', role: 'alert' });
+    const days = h('input', { className: 'mrInput mrDays', id: 'mrDays', type: 'text', inputmode: 'numeric', value: model.days, 'aria-describedby': 'mrDaysNote' });
+    const daysNote = h('p', { className: 'mrBad', role: 'alert' });
+    const reporting = h('input', { type: 'checkbox', id: 'mrReporting', checked: model.reportingEnabled });
+    const saveButton = h('button', { type: 'button', className: 'mrBtn mrPrimary mrSaveBtn' }, 'Save');
+    const saveNote = h('span', { className: 'mrSaveNote', role: 'status' });
+    const exportButton = h('button', { type: 'button', className: 'mrBtn mrExport' }, icon('download'), 'Export all reports');
+    const exportNote = h('p', { className: 'mrBad', role: 'alert' });
+
+    function edited() {
+        saveNote.textContent = '';
+        saveNote.className = 'mrSaveNote';
+    }
+
+    function uses(reason) {
+        const count = plural(reason.reports, 'report', 'reports');
+        if (reason.retired) {
+            return `Retired · ${count}`;
+        }
+        return reason.code ? count : 'New';
+    }
+
+    function move(index, by) {
+        const [reason] = model.reasons.splice(index, 1);
+        model.reasons.splice(index + by, 0, reason);
+        focusAfter = `.mrReason:nth-child(${index + by + 1}) .${by < 0 ? 'mrUp' : 'mrDown'}`;
+        refused = null;
+        edited();
+        renderReasons();
+    }
+
+    function renderReasons() {
+        list.textContent = '';
+        model.reasons.forEach((reason, index) => {
+            const label = reason.label || 'this reason';
+            const error = refused && refused.field === 'reasons' && refused.index === index ? refused.message : null;
+            const input = h('input', {
+                className: 'mrInput', type: 'text', maxlength: 40, value: reason.label, 'aria-label': `Reason ${index + 1} name`,
+                'aria-invalid': error ? 'true' : null, oninput: (e) => {
+                    reason.label = e.target.value;
+                    edited();
+                }
+            });
+            list.appendChild(h('li', { className: `mrReason${reason.retired ? ' mrRetired' : ''}` },
+                input,
+                h('span', { className: 'mrUses' }, uses(reason)),
+                h('button', { type: 'button', className: 'mrIconBtn mrUp', 'aria-label': `Move ${label} up`, disabled: index === 0, onclick: () => move(index, -1) }, icon('arrow_upward')),
+                h('button', { type: 'button', className: 'mrIconBtn mrDown', 'aria-label': `Move ${label} down`, disabled: index === model.reasons.length - 1, onclick: () => move(index, 1) }, icon('arrow_downward')),
+                h('button', {
+                    type: 'button', className: `mrLinkBtn ${reason.retired ? 'mrRestore' : 'mrRetire'}`, onclick: () => {
+                        reason.retired = !reason.retired;
+                        focusAfter = `.mrReason:nth-child(${index + 1}) .${reason.retired ? 'mrRestore' : 'mrRetire'}`;
+                        edited();
+                        renderReasons();
+                    }
+                }, reason.retired ? 'Restore' : 'Retire'),
+                error ? h('p', { className: 'mrBad', role: 'alert' }, error) : null));
+        });
+        reasonsNote.textContent = refused && refused.field === 'reasons' && refused.index === null ? refused.message : '';
+        if (focusAfter) {
+            const target = list.querySelector(focusAfter);
+            focusAfter = null;
+            if (target && !target.disabled) {
+                target.focus();
+            }
+        }
+    }
+
+    function showRefusal() {
+        renderReasons();
+        const daysWrong = refused && refused.field === 'reportRetentionDays';
+        daysNote.textContent = daysWrong ? refused.message : '';
+        days.setAttribute('aria-invalid', daysWrong ? 'true' : 'false');
+    }
+
+    function save() {
+        saveButton.disabled = true;
+        saveNote.className = 'mrSaveNote mrFaint';
+        saveNote.textContent = 'Saving…';
+        const body = {
+            ReportingEnabled: reporting.checked,
+            Reasons: model.reasons.map((r) => ({ Code: r.code, Label: r.label, Retired: r.retired })),
+            ReportRetentionDays: days.value
+        };
+        call('PUT', 'Settings', null, body).then((saved) => {
+            refused = null;
+            model.reasons = saved.Reasons.map((r) => ({ code: r.Code, label: r.Label, retired: r.Retired, reports: r.Reports }));
+            days.value = String(saved.ReportRetentionDays);
+            reporting.checked = saved.ReportingEnabled;
+            showRefusal();
+            saveNote.className = 'mrSaveNote mrOk';
+            saveNote.textContent = 'Saved';
+        }, (failure) => settingsRefusal(failure).then((r) => {
+            refused = r;
+            showRefusal();
+            saveNote.className = 'mrSaveNote mrBad';
+            saveNote.textContent = r ? "Not saved. Fix what's marked and save again." : "Settings couldn't be saved. Try again.";
+            const first = r && r.field === 'reasons' && r.index !== null ? list.children[r.index] && list.children[r.index].querySelector('input')
+                : r && r.field === 'reportRetentionDays' ? days : null;
+            if (first) {
+                first.focus();
+            }
+        })).then(() => {
+            saveButton.disabled = false;
+        });
+    }
+
+    saveButton.addEventListener('click', save);
+    exportButton.addEventListener('click', () => exportReports(exportButton, exportNote));
+    days.addEventListener('input', edited);
+    reporting.addEventListener('change', edited);
+    renderReasons();
+
+    return h('div', { className: 'mrSettings' },
+        h('section', { className: 'mrCard', 'aria-labelledby': 'mrReasonsHead' },
+            h('h2', { className: 'mrH3', id: 'mrReasonsHead' }, 'Reasons'),
+            h('p', { className: 'mrFaint' }, 'What users pick from when they report. Renaming keeps the reason on its reports; a retired reason is no longer offered but stays on the reports that used it.'),
+            list,
+            reasonsNote,
+            h('button', {
+                type: 'button', className: 'mrLinkBtn mrAddReason', onclick: () => {
+                    model.reasons.push({ code: null, label: '', retired: false, reports: 0 });
+                    focusAfter = '.mrReason:last-child input';
+                    edited();
+                    renderReasons();
+                }
+            }, icon('add'), 'Add a reason')),
+        h('section', { className: 'mrCard', 'aria-labelledby': 'mrReportingHead' },
+            h('h2', { className: 'mrH3', id: 'mrReportingHead' }, 'Reporting'),
+            h('label', { className: 'mrCheck', for: 'mrReporting' }, reporting,
+                h('span', null, 'Let users report problems',
+                    h('span', { className: 'mrFaint', style: 'display:block;margin-top:4px' },
+                        'Off removes the Report button and My Reports from every app, and new reports are refused. Reports already filed stay here.')))),
+        h('section', { className: 'mrCard', 'aria-labelledby': 'mrKeepingHead' },
+            h('h2', { className: 'mrH3', id: 'mrKeepingHead' }, 'Keeping reports'),
+            h('p', { style: 'margin:0;display:flex;flex-wrap:wrap;align-items:center' },
+                h('label', { for: 'mrDays' }, 'Delete closed reports after'), days, h('span', null, 'days')),
+            daysNote,
+            h('p', { className: 'mrFaint', id: 'mrDaysNote' }, '0 keeps them forever. Open reports are never deleted.'),
+            h('div', null, exportButton),
+            exportNote,
+            h('p', { className: 'mrFaint' }, 'Every report, issue and history entry, as one JSON file.')),
+        h('div', { className: 'mrSave' }, saveButton, saveNote));
+}
+
 // ---- The page --------------------------------------------------------------------------
 
 // One visit to the page spans its own navigation, which jellyfin-web loads as new views.
@@ -718,6 +929,28 @@ export default function (view) {
                         : couldNotLoad(show));
                 }
             }));
+            return;
+        }
+
+        if (params.tab === 'settings') {
+            root.appendChild(header(null));
+            root.appendChild(tabs(null, 'settings'));
+            root.appendChild(skeleton());
+            Promise.all([call('GET', 'Settings'), call('GET', 'Summary', { markSeen: false })]).then(([settings, summary]) => {
+                if (mine === generation) {
+                    root.textContent = '';
+                    root.appendChild(header(summary));
+                    root.appendChild(tabs(summary, 'settings'));
+                    root.appendChild(settingsPage(settings));
+                }
+            }, () => {
+                if (mine === generation) {
+                    root.textContent = '';
+                    root.appendChild(header(null));
+                    root.appendChild(tabs(null, 'settings'));
+                    root.appendChild(couldNotLoad(show));
+                }
+            });
             return;
         }
 

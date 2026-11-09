@@ -2,8 +2,8 @@
 # Starts a real Jellyfin 12 server in Docker with the plugin, seventeen movies and a
 # four-episode series, then drives the Media Reports page in the Dashboard in headless
 # Chromium as the admin, at 1280 and 390 px: the menu entry and its count, the Reports
-# tab with its states, views, grouping, rollup, filters, sort and paging, and one issue
-# with its reports, file, history, status, notes and quick actions.
+# tab with its states, views, grouping, rollup, filters, sort and paging, one issue
+# with its reports, file, history, status, notes and quick actions, and the Settings tab.
 #
 # Usage: scripts/smoke-triage.sh [--keep]
 #   --keep  leave the server running after setup and skip the browser checks
@@ -509,6 +509,73 @@ with sync_playwright() as p:
     page.locator(V + ".mrPaging button", has_text="Next").click()
     page.wait_for_function("() => (document.querySelector('.page:not(.hide) .mrPageOf') || {}).textContent === 'Page 3 of 3'", timeout=WAIT_MS)
     check(len(rows(page)) > 0 and page.locator(V + ".mrPaging button", has_text="Next").is_disabled(), "Next walks to the last page")
+
+    # ---- The Settings tab --------------------------------------------------------------
+    DEFAULT_LABELS = ["Won't play", "Playback error", "Poor quality", "Stutter or jitter", "Audio problem", "Subtitle problem", "Wrong metadata", "Other"]
+
+    def settings_loaded(pg):
+        pg.wait_for_selector(V + ".mrSettings .mrReason input", timeout=WAIT_MS)
+
+    def labels(pg):
+        return pg.evaluate("() => [...document.querySelectorAll('.page:not(.hide) .mrReason input')].map(i => i.value)")
+
+    def reason(pg, n):
+        return pg.locator(V + ".mrReason:nth-child(%d)" % n)
+
+    def saved(pg, want):
+        pg.wait_for_function("w => { const n = document.querySelector('.page:not(.hide) .mrSaveNote'); return n && n.textContent.indexOf(w) === 0; }", arg=want, timeout=WAIT_MS)
+
+    open_page(page)
+    page.locator(V + ".mrSettingsTab").click()
+    settings_loaded(page)
+    check(labels(page) == DEFAULT_LABELS, "Settings lists the eight default reasons in order (%s)" % labels(page))
+    check(re.fullmatch(r"\d+ reports?", reason(page, 4).locator(".mrUses").inner_text().strip()) is not None,
+          "each reason shows how many reports use it (%s)" % reason(page, 4).locator(".mrUses").inner_text().strip())
+    check(page.locator(V + ".mrTab[aria-current=page]").inner_text().strip() == "Settings", "the Settings tab is the current tab")
+
+    reason(page, 4).locator("input").fill("Audio problem")
+    page.locator(V + ".mrSaveBtn").click()
+    saved(page, "Not saved")
+    check("Another reason already has this name" in reason(page, 4).locator(".mrBad").inner_text() and reason(page, 4).locator("input").input_value() == "Audio problem",
+          "a duplicate label shows the server's reason beside the reason and keeps the edit")
+
+    reason(page, 4).locator("input").fill("Choppy video")
+    reason(page, 8).locator(".mrUp").click()
+    reason(page, 8).locator(".mrRetire").click()
+    page.locator(V + ".mrAddReason").click()
+    page.locator(V + ".mrReason:last-child input").fill("Wrong language")
+    page.locator(V + "#mrReporting").uncheck()
+    page.locator(V + "#mrDays").fill("30")
+    page.locator(V + ".mrSaveBtn").click()
+    saved(page, "Saved")
+    after = ["Won't play", "Playback error", "Poor quality", "Choppy video", "Audio problem", "Subtitle problem", "Other", "Wrong metadata", "Wrong language"]
+    page.reload()
+    settings_loaded(page)
+    check(labels(page) == after and reason(page, 8).locator(".mrUses").inner_text().startswith("Retired · ") and reason(page, 8).locator(".mrRestore").count() == 1
+          and not page.locator(V + "#mrReporting").is_checked() and page.locator(V + "#mrDays").input_value() == "30",
+          "after Save and a reload: renamed, moved, retired with Restore, added, reporting off and 30 days (%s)" % labels(page))
+    settings = ok("GET", "/MediaReports/Admin/Settings", ADMIN)
+    check([r["Label"] for r in settings["Reasons"]] == after and settings["Reasons"][3]["Code"] == "stutter" and settings["Reasons"][-1]["Code"] == "wrong-language",
+          "the server kept the codes and gave the added reason its own")
+    reason(page, 8).locator(".mrRestore").click()
+    check(reason(page, 8).locator(".mrRetire").count() == 1 and not reason(page, 8).locator(".mrUses").inner_text().startswith("Retired"), "Restore brings a retired reason back")
+    ok("PUT", "/MediaReports/Admin/Settings", ADMIN, {"ReportingEnabled": True})
+
+    with page.expect_download(timeout=WAIT_MS) as download_info:
+        page.locator(V + ".mrExport").click()
+    download = download_info.value
+    exported = json.load(open(download.path(), encoding="utf-8"))
+    check(re.fullmatch(r"media-reports-export-\d{4}-\d{2}-\d{2}\.json", download.suggested_filename) is not None and len(exported["reports"]) > 100,
+          "Export all reports downloads the JSON export (%s, %d reports)" % (download.suggested_filename, len(exported["reports"])))
+
+    phone = b.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True).new_page()
+    sign_in(phone, "admin")
+    open_page(phone, "&tab=settings")
+    settings_loaded(phone)
+    outside = phone.evaluate("""() => [...document.querySelectorAll('.page:not(.hide) .mrSettings button, .page:not(.hide) .mrSettings input')]
+        .map(e => e.getBoundingClientRect()).filter(r => r.left < 0 || r.right > window.innerWidth + 1).length""")
+    check(no_overflow(phone) and outside == 0, "at 390 px the Settings tab doesn't overflow and every control is on screen (%d off screen)" % outside)
+    phone.close()
 
     check(not errors, "no script errors on the page" + (": " + "; ".join(errors) if errors else ""))
 

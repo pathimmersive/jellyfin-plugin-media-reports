@@ -20,16 +20,19 @@ namespace Jellyfin.Plugin.MediaReports.Api;
 public sealed class AdminController : ControllerBase
 {
     private readonly AdminService _service;
+    private readonly SettingsService _settings;
     private readonly IAuthorizationContext _authorization;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AdminController"/> class.
     /// </summary>
     /// <param name="service">The admin's issue rules.</param>
+    /// <param name="settings">Reads and saves the settings.</param>
     /// <param name="authorization">The request's authorization context.</param>
-    public AdminController(AdminService service, IAuthorizationContext authorization)
+    public AdminController(AdminService service, SettingsService settings, IAuthorizationContext authorization)
     {
         _service = service;
+        _settings = settings;
         _authorization = authorization;
     }
 
@@ -151,6 +154,38 @@ public sealed class AdminController : ControllerBase
     {
         var admin = await Caller().ConfigureAwait(false);
         return Answer(() => _service.Scan(id, admin), StatusCodes.Status202Accepted);
+    }
+
+    /// <summary>
+    /// Gets the settings the Settings tab shows, with each reason's report count.
+    /// </summary>
+    /// <returns>The settings.</returns>
+    [HttpGet("Settings")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public ActionResult<AdminSettings> GetSettings() =>
+        Answer(() => ServiceResult<AdminSettings>.Success(_settings.Get()), StatusCodes.Status200OK);
+
+    /// <summary>
+    /// Checks and saves the settings. Nothing is saved when anything is refused.
+    /// </summary>
+    /// <param name="update">The change; a field left out keeps its saved value.</param>
+    /// <returns>The saved settings, or the refusal and the field at fault.</returns>
+    [HttpPut("Settings")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public ActionResult<AdminSettings> UpdateSettings([FromBody] SettingsUpdate update)
+    {
+        try
+        {
+            var (saved, error) = _settings.Update(update);
+            return error is null ? Ok(saved) : BadRequest(error);
+        }
+        catch (StorageUnavailableException)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new IssueError("storage-unavailable", "Reports can't be read right now."));
+        }
     }
 
     private async Task<Guid> Caller() =>

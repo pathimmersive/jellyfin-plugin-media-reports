@@ -336,12 +336,15 @@ public sealed class AdminServiceTests : IDisposable
         var service = new AdminService(new ReportStore(db, _clock, () => 365), _library.Object, _users.Object, _mediaSources.Object, _providers.Object, Mock.Of<IFileSystem>(), () => _config, () => "server-1", new ReporterNotifier(Mock.Of<MediaBrowser.Controller.Session.ISessionManager>(), _store, NullLogger<ReporterNotifier>.Instance));
         var authorization = new Mock<IAuthorizationContext>();
         authorization.Setup(m => m.GetAuthorizationInfo(It.IsAny<HttpContext>())).ReturnsAsync(new AuthorizationInfo { User = _admin });
-        var controller = new AdminController(service, authorization.Object) { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() } };
+        var settings = new SettingsService(new ReportStore(db, _clock, () => 365), () => _config, _ => throw new InvalidOperationException("nothing is saved"));
+        var controller = new AdminController(service, settings, authorization.Object) { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() } };
 
         var list = (await controller.ListIssues()).Result as ObjectResult;
         var one = controller.GetIssue(1).Result as ObjectResult;
+        var read = controller.GetSettings().Result as ObjectResult;
+        var save = controller.UpdateSettings(new SettingsUpdate { Reasons = [new ReasonUpdate(null, "New one", false)] }).Result as ObjectResult;
 
-        foreach (var answer in new[] { list, one })
+        foreach (var answer in new[] { list, one, read, save })
         {
             Assert.Equal(StatusCodes.Status503ServiceUnavailable, answer!.StatusCode);
             Assert.Equal("storage-unavailable", ((IssueError)answer.Value!).Code);

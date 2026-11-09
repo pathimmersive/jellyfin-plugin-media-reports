@@ -52,6 +52,10 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
             () => Plugin.Instance?.Configuration ?? new PluginConfiguration(),
             () => applicationHost.SystemId,
             provider.GetRequiredService<ReporterNotifier>()));
+        serviceCollection.AddSingleton(provider => new SettingsService(
+            provider.GetRequiredService<ReportStore>(),
+            () => Plugin.Instance?.Configuration ?? new PluginConfiguration(),
+            config => Plugin.Instance?.UpdateConfiguration(config)));
         serviceCollection.AddScoped<IEventConsumer<UserDeletedEventArgs>, UserDeletedConsumer>();
         serviceCollection.AddTransient<IStartupFilter, IndexPageStartupFilter>();
     }

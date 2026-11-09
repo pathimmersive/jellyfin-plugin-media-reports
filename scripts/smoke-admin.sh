@@ -3,7 +3,7 @@
 # series, files reports as two users, then works them through the admin issues API: access,
 # the summary and its new count, the issue list with grouping and the season rollup, one
 # issue with the file as Jellyfin has it now, status rules, notes, Set status for all,
-# Refresh and Scan, and a movie removed from the library.
+# Refresh and Scan, a movie removed from the library, and the settings API with Export.
 #
 # Usage: scripts/smoke-admin.sh [--without-plugin]
 #   --without-plugin  start the server with no plugin; the script must fail
@@ -178,7 +178,8 @@ lone_issue="$(file "Bob Laptop" "$bob" "${episodes[3]}" metadata)"
 echo "== access"
 for call in "GET /MediaReports/Admin/Summary" "GET /MediaReports/Admin/Issues" "GET /MediaReports/Admin/Issues/$movie_issue" \
   "PATCH /MediaReports/Admin/Issues/$movie_issue" "POST /MediaReports/Admin/Issues/Status" \
-  "POST /MediaReports/Admin/Issues/$movie_issue/Refresh" "POST /MediaReports/Admin/Issues/$movie_issue/Scan"; do
+  "POST /MediaReports/Admin/Issues/$movie_issue/Refresh" "POST /MediaReports/Admin/Issues/$movie_issue/Scan" \
+  "GET /MediaReports/Admin/Settings" "PUT /MediaReports/Admin/Settings" "GET /MediaReports/Admin/Export"; do
   set -- $call
   expect 401 "" "" "" "$1" "$2" '{}'
   got="$(req "Bob Laptop" "$bob" "$1" "$2" '{"status":"Fixed","issueIds":[1]}')"
@@ -278,5 +279,68 @@ check "$work/results/gone.json" "f = d['File']; assert f['InLibrary'] is False a
 expect 404 not-in-library "admin box" "$admin" POST "/MediaReports/Admin/Issues/$gone_issue/Scan"
 expect 404 not-in-library "admin box" "$admin" POST "/MediaReports/Admin/Issues/$gone_issue/Refresh"
 echo "removed movie: inLibrary false with the stored path, Refresh and Scan 404"
+
+echo "== settings"
+settings() { ok "admin box" "$admin" GET /MediaReports/Admin/Settings >"$work/results/$1.json"; }
+settings settings
+check "$work/results/settings.json" "
+assert [r['Code'] for r in d['Reasons']] == ['wont-play', 'playback-error', 'poor-quality', 'stutter', 'audio', 'subtitles', 'metadata', 'other'], d['Reasons']
+counts = {r['Code']: r['Reports'] for r in d['Reasons']}
+assert (counts['stutter'], counts['subtitles'], counts['metadata'], counts['other']) == (3, 3, 1, 0), counts
+assert d['ReportingEnabled'] is True and d['ReportRetentionDays'] == 365, d
+" "Settings GET does not list the eight defaults with their report counts"
+# reasons <python expression over r, the saved reasons>: a Reasons array for a PUT.
+reasons() {
+  py - "$work/results/settings.json" "$1" <<'PY' | tr -d '\r'
+import json, sys
+r = [{'Code': x['Code'], 'Label': x['Label'], 'Retired': x['Retired']} for x in json.load(open(sys.argv[1]))['Reasons']]
+print(json.dumps(eval(sys.argv[2])))
+PY
+}
+dup="$(reasons "[dict(x, Label='Audio problem') if x['Code'] == 'stutter' else x for x in r]")"
+expect 400 label-duplicate "admin box" "$admin" PUT /MediaReports/Admin/Settings "{\"Reasons\":$dup,\"ReportingEnabled\":false}"
+check "$work/results/last.json" "assert d['Field'] == 'reasons' and d['ReasonIndex'] == 3, d" "the duplicate label is not pinned on the renamed reason"
+expect 400 label-empty "admin box" "$admin" PUT /MediaReports/Admin/Settings "{\"Reasons\":$(reasons "r + [{'Code': None, 'Label': ' ', 'Retired': False}]")}"
+expect 400 no-active-reason "admin box" "$admin" PUT /MediaReports/Admin/Settings "{\"Reasons\":$(reasons "[dict(x, Retired=True) for x in r]")}"
+expect 400 retention-invalid "admin box" "$admin" PUT /MediaReports/Admin/Settings '{"ReportRetentionDays":"ten"}'
+expect 400 retention-invalid "admin box" "$admin" PUT /MediaReports/Admin/Settings '{"ReportRetentionDays":-1}'
+expect 400 webhook-invalid "admin box" "$admin" PUT /MediaReports/Admin/Settings '{"WebhookUrl":"ftp://example.com/hook"}'
+settings unchanged
+cmp -s "$work/results/settings.json" "$work/results/unchanged.json" || fail "a refused save changed the settings"
+echo "refused saves name the field and change nothing"
+
+saved="$(reasons "[dict(x, Label='Choppy video') if x['Code'] == 'stutter' else dict(x, Retired=True) if x['Code'] == 'metadata' else x for x in r] + [{'Code': None, 'Label': 'Wrong language', 'Retired': False}]")"
+ok "admin box" "$admin" PUT /MediaReports/Admin/Settings "{\"Reasons\":$saved,\"ReportRetentionDays\":\"30\"}" >"$work/results/saved.json"
+check "$work/results/saved.json" "
+codes = [r['Code'] for r in d['Reasons']]
+assert codes[-1] == 'wrong-language' and len(set(codes)) == 9, codes
+assert d['ReportRetentionDays'] == 30, d
+" "the save did not keep the codes and add the new reason"
+ok "Living Room TV" "$alice" GET "/MediaReports/Report/Context?itemId=$movie" >"$work/results/context.json"
+check "$work/results/context.json" "
+labels = [r['Label'] for r in d['Reasons']]
+assert 'Choppy video' in labels and 'Wrong metadata' not in labels and labels[-1] == 'Wrong language', labels
+" "the report dialog does not offer the saved reasons"
+ok "admin box" "$admin" GET "/MediaReports/Admin/Issues/$movie_issue" | json "d['ReasonLabel']" | grep -x "Choppy video" >/dev/null \
+  || fail "the older issue does not show the renamed reason"
+settings after
+check "$work/results/after.json" "
+m = [r for r in d['Reasons'] if r['Code'] == 'metadata'][0]
+assert m['Retired'] is True and m['Reports'] == 1, m
+" "the retired reason lost its report count"
+echo "renamed, retired and added: the report dialog and an older issue use them without a restart"
+
+ok "admin box" "$admin" PUT /MediaReports/Admin/Settings '{"ReportingEnabled":false}' >/dev/null
+expect 403 reporting-off "Bob Laptop" "$bob" POST /MediaReports/Report "{\"itemId\":\"${episodes[1]}\",\"reasonCode\":\"audio\"}"
+ok "admin box" "$admin" PUT /MediaReports/Admin/Settings '{"ReportingEnabled":true}' >/dev/null
+ok "admin box" "$admin" GET /MediaReports/Admin/Settings | json "(d['ReportingEnabled'], d['ReportRetentionDays'], d['Reasons'][3]['Label'])" | grep -x "(True, 30, 'Choppy video')" >/dev/null \
+  || fail "a save of one field changed the others"
+echo "reporting off refuses the next report without a restart; a save of one field keeps the rest"
+
+echo "== Export"
+curl -sS -D "$work/results/export.headers" -o "$work/results/export.json" -H "Authorization: $(auth "admin box" "$admin")" "$api/MediaReports/Admin/Export"
+grep -qi 'filename=.*media-reports-export-.*\.json' "$work/results/export.headers" || fail "Export is not a JSON download"
+check "$work/results/export.json" "assert len(d['issues']) >= 6 and len(d['reports']) >= 7 and len(d['events']) >= 7, {k: len(v) for k, v in d.items() if isinstance(v, list)}" "Export does not hold every issue, report and event"
+echo "Export downloads every issue, report and event"
 
 echo "PASS: the admin issues API on $image"

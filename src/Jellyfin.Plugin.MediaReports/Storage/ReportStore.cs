@@ -577,6 +577,28 @@ public sealed class ReportStore
     }
 
     /// <summary>
+    /// Gets how many reports use each reason code.
+    /// </summary>
+    /// <returns>The count per code; a code no report uses is absent.</returns>
+    public IReadOnlyDictionary<string, int> GetReasonReportCounts()
+    {
+        using var connection = _db.OpenConnection();
+        return Rows(connection, "SELECT reason_code, COUNT(*) FROM report GROUP BY reason_code", r => (r.GetString(0), r.GetInt32(1)))
+            .ToDictionary(c => c.Item1, c => c.Item2, StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// Gets every reason code a stored issue or report uses, so a new reason never takes one.
+    /// </summary>
+    /// <returns>The codes.</returns>
+    public IReadOnlySet<string> GetUsedReasonCodes()
+    {
+        using var connection = _db.OpenConnection();
+        return Rows(connection, "SELECT reason_code FROM issue UNION SELECT reason_code FROM report", r => r.GetString(0))
+            .ToHashSet(StringComparer.Ordinal);
+    }
+
+    /// <summary>
     /// Gets how many reports are stored.
     /// </summary>
     /// <returns>The count.</returns>

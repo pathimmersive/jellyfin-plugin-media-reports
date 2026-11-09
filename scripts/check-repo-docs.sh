@@ -41,6 +41,10 @@ if [[ -s README.md ]]; then
   contains README.md "unofficial" "say the plugin is unofficial"
   contains README.md "not affiliated with or endorsed by the Jellyfin project" "say the plugin is not endorsed by Jellyfin"
   contains README.md "Jellyfin 12\.0" "name the supported Jellyfin versions"
+  # GitHub drops style attributes but keeps align, so the logo is centred with <p align="center">.
+  # awk reads the file itself: grep | head would fail under pipefail when head closes the pipe.
+  opening="$(awk 'NF { print; if (++n == 2) exit }' README.md | tr -d '\r' | tr '\n' ' ')"
+  [[ "$opening" =~ ^\<p\ align=\"center\"\>\ +\<picture\> ]] || fail "README.md does not open with the logo centred"
   contains README.md "https://pathimmersive\.github\.io/jellyfin-plugin-media-reports/manifest\.json" "give the plugin repository URL"
 fi
 if [[ -s CONTRIBUTING.md ]]; then

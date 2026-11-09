@@ -19,5 +19,12 @@ Not distributed with the plugin.
 |---|---|
 | Microsoft.NET.Test.Sdk | MIT |
 | Moq | BSD-3-Clause |
+| SkiaSharp | MIT |
+| SkiaSharp.NativeAssets.Linux.NoDependencies | MIT |
+| Svg.Skia | MIT |
 | xunit | Apache-2.0 |
 | xunit.runner.visualstudio | Apache-2.0 |
+
+## Artwork
+
+The logo in `assets/logo` and the plugin's catalog image are original artwork, licensed with the plugin. The wordmark is set in Sora (Copyright 2019 The Sora Project Authors, SIL Open Font License 1.1) and drawn as outlines, so no font file is included or shipped.

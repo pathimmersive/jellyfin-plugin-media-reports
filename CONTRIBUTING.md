@@ -19,6 +19,8 @@ bash scripts/repo-install-check.sh   # Jellyfin installs it from a plugin reposi
 bash scripts/check-repo-docs.sh      # repository documents and third-party notices are complete
 ```
 
+The logo's SVG files in `assets/logo` are its source. After changing one, run `dotnet run scripts/render-logo.cs` to remake the PNGs; `scripts/check-repo-docs.sh` fails when a PNG no longer matches its SVG.
+
 The scripts start their own throwaway Jellyfin containers. Test against a local container like these, never against a server other people are using.
 
 The plugin builds against the lowest Jellyfin version it supports (`Jellyfin.Controller` 12.0.*). Don't raise that to use a newer API without raising `targetAbi` in `meta.json` too.

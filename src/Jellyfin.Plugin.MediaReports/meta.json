@@ -10,6 +10,7 @@
   "timestamp": "2026-10-21T00:00:00Z",
   "version": "0.1.0.0",
   "status": "Active",
+  "imagePath": "media-reports.png",
   "autoUpdate": false,
   "assemblies": []
 }

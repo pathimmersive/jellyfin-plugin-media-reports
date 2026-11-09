@@ -7,9 +7,11 @@
 //     and <out>/media-reports_<version>.json, the manifest entry for that zip.
 //
 //   dotnet run scripts/release-tool.cs -- manifest --meta <meta.json> --out <manifest.json>
-//       (--entries <dir> | --github)
+//       --image-url-base <url> (--entries <dir> | --github)
 //     Writes manifest.json from the entry files in <dir>, or from the entry file attached
 //     to every GitHub Release of the repository (GITHUB_REPOSITORY, and GITHUB_TOKEN if set).
+//     Copies the catalog image meta.json names next to it; the manifest gives its URL as
+//     <url>/<image file name>.
 
 using System.IO.Compression;
 using System.Security.Cryptography;
@@ -113,8 +115,12 @@ void Package(Dictionary<string, string> options)
 
 async Task Manifest(Dictionary<string, string> options)
 {
-    var meta = ReadJsonObject(Required(options, "meta"));
+    var metaPath = Required(options, "meta");
+    var meta = ReadJsonObject(metaPath);
     var outPath = Required(options, "out");
+    var imageUrlBase = Required(options, "image-url-base").TrimEnd('/');
+    var imageName = meta["imagePath"]?.GetValue<string>()
+        ?? throw new InvalidDataException("meta.json has no imagePath");
 
     List<JsonObject> entries;
     if (options.TryGetValue("entries", out var entriesDir))
@@ -152,10 +158,12 @@ async Task Manifest(Dictionary<string, string> options)
         package[field] = meta[field]?.DeepClone();
     }
 
+    package["imageUrl"] = $"{imageUrlBase}/{imageName}";
     package["versions"] = versions;
 
     var dir = Path.GetDirectoryName(Path.GetFullPath(outPath))!;
     Directory.CreateDirectory(dir);
+    File.Copy(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(metaPath))!, imageName), Path.Combine(dir, imageName), true);
     using (var manifestStream = File.Create(outPath))
     {
         WriteJson(manifestStream, new JsonArray(package));

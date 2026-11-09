@@ -2,7 +2,9 @@
 # Proves a Jellyfin server accepts the release zip and manifest.json: packages the
 # plugin, serves the zip and manifest from a local web container, adds that URL as
 # a plugin repository on a local Jellyfin, installs the plugin through the API,
-# restarts the server and waits for it to report the plugin loaded.
+# restarts the server and waits for it to report the plugin loaded. Checks the catalog
+# image along the way: the manifest names it, the repository serves it, the plugin
+# folder holds it and the server serves it for the installed plugin.
 #
 # Usage: scripts/repo-install-check.sh [--corrupt-zip]
 #   --corrupt-zip  change the zip after its checksum is computed; the install must fail
@@ -28,6 +30,8 @@ meta="src/Jellyfin.Plugin.MediaReports/meta.json"
 plugin_name="$(sed -n 's/.*"name": *"\([^"]*\)".*/\1/p' "$meta")"
 plugin_guid="$(sed -n 's/.*"guid": *"\([^"]*\)".*/\1/p' "$meta")"
 version="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$meta")"
+image_name="$(sed -n 's/.*"imagePath": *"\([^"]*\)".*/\1/p' "$meta")"
+image_file="src/Jellyfin.Plugin.MediaReports/$image_name"
 
 suffix="$$"
 network="media-reports-check-$suffix"
@@ -52,18 +56,25 @@ echo "== package $version"
 rm -rf "$out_dir"
 bash scripts/package.sh "$version" "$out_dir" "http://$repo_host" "Local repository check"
 zip_path="$out_dir/media-reports_${version}.zip"
+# Jellyfin also downloads the image from the manifest, so check the package itself ships it.
+cmp -s "$out_dir/publish/$image_name" "$image_file" || fail "the packaged plugin does not ship $image_name"
 if [[ $corrupt -eq 1 ]]; then
   echo "== corrupt the zip after its checksum was computed"
   printf 'corrupted' >>"$zip_path"
 fi
-bash scripts/build-manifest.sh "$out_dir/manifest.json" --entries "$out_dir"
+bash scripts/build-manifest.sh "$out_dir/manifest.json" "http://$repo_host" --entries "$out_dir"
+grep -q "\"imageUrl\": \"http://$repo_host/$image_name\"" "$out_dir/manifest.json" ||
+  fail "the manifest does not name the catalog image $image_name"
 
 echo "== serve the repository"
 docker network create "$network" >/dev/null
 docker create --name "$repo_container" --network "$network" --network-alias "$repo_host" nginx:alpine >/dev/null
 docker cp "$out_dir/manifest.json" "$repo_container:/usr/share/nginx/html/manifest.json"
 docker cp "$zip_path" "$repo_container:/usr/share/nginx/html/"
+docker cp "$out_dir/$image_name" "$repo_container:/usr/share/nginx/html/"
 docker start "$repo_container" >/dev/null
+docker exec "$repo_container" wget -q -O /dev/null "http://localhost/$image_name" ||
+  fail "the repository does not serve $image_name"
 
 echo "== start $image"
 docker pull --quiet "$image" >/dev/null
@@ -119,6 +130,8 @@ echo "== add the repository and install $plugin_name $version"
 call POST /Repositories "[{\"Name\":\"Media Reports check\",\"Url\":\"$repo_url\",\"Enabled\":true}]"
 packages="$(call GET /Packages)"
 grep -q "\"name\":\"$plugin_name\"" <<<"$packages" || fail "the server does not list $plugin_name from $repo_url"
+grep -q "\"imageUrl\":\"http://$repo_host/$image_name\"" <<<"$packages" ||
+  fail "the catalog does not give the image URL for $plugin_name"
 encoded_name="${plugin_name// /%20}"
 call POST "/Packages/Installed/$encoded_name?assemblyGuid=$plugin_guid&version=$version&repositoryUrl=$repo_url"
 
@@ -139,4 +152,24 @@ docker restart "$server_container" >/dev/null
 loaded_pattern="Loaded plugin: \"?${plugin_name}\"? \"?${version}\"?"
 wait_for_log "$loaded_pattern"
 docker logs "$server_container" 2>&1 | grep -E "$loaded_pattern"
+
+echo "== the installed plugin's image"
+# The restart gives the container a new host port.
+port="$(docker port "$server_container" 8096/tcp | head -n 1 | sed 's/.*://')"
+api="http://127.0.0.1:$port"
+deadline=$((SECONDS + timeout))
+until curl -sf -o /dev/null "$api/System/Info/Public"; do
+  (( SECONDS < deadline )) || fail "the server did not answer after the restart"
+  sleep 2
+done
+docker exec "$server_container" sh -c "ls /config/plugins/*/$image_name" >/dev/null 2>&1 ||
+  fail "the plugin folder does not hold $image_name"
+plugins="$(call GET /Plugins)"
+grep -Eq "\"Name\":\"$plugin_name\"[^}]*\"HasImage\":true|\"HasImage\":true[^}]*\"Name\":\"$plugin_name\"" <<<"$plugins" ||
+  fail "the installed plugin list shows no image for $plugin_name"
+served="$out_dir/served-$image_name"
+curl -sS --fail -o "$served" "$api/Plugins/$plugin_guid/$version/Image" ||
+  fail "the server does not serve the image of $plugin_name"
+cmp -s "$served" "$image_file" || fail "the server serves a different image than $image_file"
+echo "the server serves $image_name for $plugin_name $version"
 echo "PASS: $image (Jellyfin ${server_version:-unknown}) installed $plugin_name $version from the repository and loaded it"

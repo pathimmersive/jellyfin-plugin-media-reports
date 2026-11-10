@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.MediaReports.Notifications;
 using Jellyfin.Plugin.MediaReports.Storage;
 using MediaBrowser.Common.Api;
 using MediaBrowser.Controller.Net;
@@ -21,6 +22,7 @@ public sealed class AdminController : ControllerBase
 {
     private readonly AdminService _service;
     private readonly SettingsService _settings;
+    private readonly ReportAlerts _alerts;
     private readonly IAuthorizationContext _authorization;
 
     /// <summary>
@@ -28,11 +30,13 @@ public sealed class AdminController : ControllerBase
     /// </summary>
     /// <param name="service">The admin's issue rules.</param>
     /// <param name="settings">Reads and saves the settings.</param>
+    /// <param name="alerts">Sends the admin's alerts, for the test alert.</param>
     /// <param name="authorization">The request's authorization context.</param>
-    public AdminController(AdminService service, SettingsService settings, IAuthorizationContext authorization)
+    public AdminController(AdminService service, SettingsService settings, ReportAlerts alerts, IAuthorizationContext authorization)
     {
         _service = service;
         _settings = settings;
+        _alerts = alerts;
         _authorization = authorization;
     }
 
@@ -186,6 +190,20 @@ public sealed class AdminController : ControllerBase
         {
             return StatusCode(StatusCodes.Status503ServiceUnavailable, new IssueError("storage-unavailable", "Reports can't be read right now."));
         }
+    }
+
+    /// <summary>
+    /// Sends one sample report to each webhook address given, saved or not, and says whether
+    /// each accepted it. Saves nothing.
+    /// </summary>
+    /// <param name="request">The addresses as typed.</param>
+    /// <returns>One result per address given.</returns>
+    [HttpPost("Settings/TestAlert")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<ActionResult<IReadOnlyList<TestAlertResult>>> TestAlert([FromBody] TestAlertRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return Ok(await _alerts.SendTestAsync(request.DiscordWebhookUrl, request.WebhookUrl).ConfigureAwait(false));
     }
 
     private async Task<Guid> Caller() =>

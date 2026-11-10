@@ -140,6 +140,11 @@ const STYLES = `
 .mrInput:focus{outline:2px solid var(--mr-accent);outline-offset:-1px}
 .mrInput[aria-invalid=true]{border-color:#ffb4ab}
 .mrDays{width:90px;margin:0 8px}
+.mrHook{display:flex;flex-direction:column}
+.mrHook>*+*{margin-top:6px}
+.mrHook label{font-size:14px;color:var(--mr-muted)}
+.mrHook .mrInput{width:100%}
+.mrHook .mrOk,.mrHook .mrBad{margin:0}
 .mrCheck{display:flex;align-items:flex-start;font-size:15px;color:#fff;cursor:pointer}
 .mrCheck input{width:20px;height:20px;margin:1px 12px 0 0;flex-shrink:0;accent-color:var(--mr-accent)}
 .mrSave{display:flex;flex-wrap:wrap;align-items:center}
@@ -724,6 +729,15 @@ function settingsPage(settings) {
     const days = h('input', { className: 'mrInput mrDays', id: 'mrDays', type: 'text', inputmode: 'numeric', value: model.days, 'aria-describedby': 'mrDaysNote' });
     const daysNote = h('p', { className: 'mrBad', role: 'alert' });
     const reporting = h('input', { type: 'checkbox', id: 'mrReporting', checked: model.reportingEnabled });
+    const hooks = [
+        { field: 'discordWebhookUrl', id: 'mrDiscord', label: 'Discord webhook', value: settings.DiscordWebhookUrl, placeholder: 'https://discord.com/api/webhooks/…' },
+        { field: 'webhookUrl', id: 'mrWebhook', label: 'Other webhook (JSON POST)', value: settings.WebhookUrl, placeholder: 'https://' }
+    ].map((hook) => Object.assign(hook, {
+        input: h('input', { className: 'mrInput', id: hook.id, type: 'url', value: hook.value, placeholder: hook.placeholder, 'aria-describedby': hook.id + 'Note' }),
+        note: h('p', { id: hook.id + 'Note', role: 'status' })
+    }));
+    const testButton = h('button', { type: 'button', className: 'mrBtn mrTestAlert' }, icon('send'), 'Send a test alert');
+    const testNote = h('p', { className: 'mrFaint', role: 'status' });
     const saveButton = h('button', { type: 'button', className: 'mrBtn mrPrimary mrSaveBtn' }, 'Save');
     const saveNote = h('span', { className: 'mrSaveNote', role: 'status' });
     const exportButton = h('button', { type: 'button', className: 'mrBtn mrExport' }, icon('download'), 'Export all reports');
@@ -788,7 +802,40 @@ function settingsPage(settings) {
         }
     }
 
+    function hookNote(hook, text, good) {
+        hook.note.className = good ? 'mrOk' : 'mrBad';
+        hook.note.textContent = text || '';
+        hook.input.setAttribute('aria-invalid', text && !good ? 'true' : 'false');
+    }
+
+    function sendTest() {
+        testNote.textContent = '';
+        hooks.forEach((hook) => hookNote(hook, ''));
+        if (hooks.every((hook) => !hook.input.value.trim())) {
+            testNote.textContent = 'Enter a webhook address first.';
+            return;
+        }
+        testButton.disabled = true;
+        testNote.textContent = 'Sending…';
+        call('POST', 'Settings/TestAlert', null, { DiscordWebhookUrl: hooks[0].input.value, WebhookUrl: hooks[1].input.value })
+            .then((results) => {
+                testNote.textContent = '';
+                for (const result of results) {
+                    const hook = hooks.find((x) => x.field === result.Field);
+                    if (hook) {
+                        hookNote(hook, result.Accepted ? 'Test alert accepted' : `Test alert failed: ${result.Message}`, result.Accepted);
+                    }
+                }
+            }, () => {
+                testNote.textContent = "The test alert couldn't be sent. Try again.";
+            })
+            .then(() => {
+                testButton.disabled = false;
+            });
+    }
+
     function showRefusal() {
+        hooks.forEach((hook) => hookNote(hook, refused && refused.field === hook.field ? refused.message : ''));
         renderReasons();
         const daysWrong = refused && refused.field === 'reportRetentionDays';
         daysNote.textContent = daysWrong ? refused.message : '';
@@ -802,13 +849,17 @@ function settingsPage(settings) {
         const body = {
             ReportingEnabled: reporting.checked,
             Reasons: model.reasons.map((r) => ({ Code: r.code, Label: r.label, Retired: r.retired })),
-            ReportRetentionDays: days.value
+            ReportRetentionDays: days.value,
+            DiscordWebhookUrl: hooks[0].input.value,
+            WebhookUrl: hooks[1].input.value
         };
         call('PUT', 'Settings', null, body).then((saved) => {
             refused = null;
             model.reasons = saved.Reasons.map((r) => ({ code: r.Code, label: r.Label, retired: r.Retired, reports: r.Reports }));
             days.value = String(saved.ReportRetentionDays);
             reporting.checked = saved.ReportingEnabled;
+            hooks[0].input.value = saved.DiscordWebhookUrl;
+            hooks[1].input.value = saved.WebhookUrl;
             showRefusal();
             saveNote.className = 'mrSaveNote mrOk';
             saveNote.textContent = 'Saved';
@@ -818,7 +869,8 @@ function settingsPage(settings) {
             saveNote.className = 'mrSaveNote mrBad';
             saveNote.textContent = r ? "Not saved. Fix what's marked and save again." : "Settings couldn't be saved. Try again.";
             const first = r && r.field === 'reasons' && r.index !== null ? list.children[r.index] && list.children[r.index].querySelector('input')
-                : r && r.field === 'reportRetentionDays' ? days : null;
+                : r && r.field === 'reportRetentionDays' ? days
+                    : r && hooks.find((hook) => hook.field === r.field) ? hooks.find((hook) => hook.field === r.field).input : null;
             if (first) {
                 first.focus();
             }
@@ -830,6 +882,8 @@ function settingsPage(settings) {
     saveButton.addEventListener('click', save);
     exportButton.addEventListener('click', () => exportReports(exportButton, exportNote));
     days.addEventListener('input', edited);
+    hooks.forEach((hook) => hook.input.addEventListener('input', edited));
+    testButton.addEventListener('click', sendTest);
     reporting.addEventListener('change', edited);
     renderReasons();
 
@@ -853,6 +907,12 @@ function settingsPage(settings) {
                 h('span', null, 'Let users report problems',
                     h('span', { className: 'mrFaint', style: 'display:block;margin-top:4px' },
                         'Off removes the Report button and My Reports from every app, and new reports are refused. Reports already filed stay here.')))),
+        h('section', { className: 'mrCard mrAlerts', 'aria-labelledby': 'mrAlertsHead' },
+            h('h2', { className: 'mrH3', id: 'mrAlertsHead' }, 'Alerts'),
+            h('p', { className: 'mrFaint' }, "Each new report is posted here within a minute; reports filed in the same minute come as one message. Every report is also in Jellyfin's activity log."),
+            hooks.map((hook) => h('div', { className: 'mrHook' }, h('label', { for: hook.id }, hook.label), hook.input, hook.note)),
+            h('div', null, testButton),
+            testNote),
         h('section', { className: 'mrCard', 'aria-labelledby': 'mrKeepingHead' },
             h('h2', { className: 'mrH3', id: 'mrKeepingHead' }, 'Keeping reports'),
             h('p', { style: 'margin:0;display:flex;flex-wrap:wrap;align-items:center' },

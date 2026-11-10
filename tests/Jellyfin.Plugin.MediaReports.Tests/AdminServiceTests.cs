@@ -337,7 +337,8 @@ public sealed class AdminServiceTests : IDisposable
         var authorization = new Mock<IAuthorizationContext>();
         authorization.Setup(m => m.GetAuthorizationInfo(It.IsAny<HttpContext>())).ReturnsAsync(new AuthorizationInfo { User = _admin });
         var settings = new SettingsService(new ReportStore(db, _clock, () => 365), () => _config, _ => throw new InvalidOperationException("nothing is saved"));
-        var controller = new AdminController(service, settings, authorization.Object) { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() } };
+        var alerts = new ReportAlerts(() => new System.Net.Http.HttpClient(), Mock.Of<MediaBrowser.Model.Activity.IActivityManager>(), () => _config, () => "http://localhost:8096", _clock, NullLogger<ReportAlerts>.Instance);
+        var controller = new AdminController(service, settings, alerts, authorization.Object) { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() } };
 
         var list = (await controller.ListIssues()).Result as ObjectResult;
         var one = controller.GetIssue(1).Result as ObjectResult;

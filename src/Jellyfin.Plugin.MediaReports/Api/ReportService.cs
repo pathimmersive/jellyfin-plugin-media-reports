@@ -29,6 +29,7 @@ public sealed class ReportService
     private readonly ReportStore _store;
     private readonly Func<PluginConfiguration> _config;
     private readonly TimeProvider _time;
+    private readonly Action<StoredReport>? _filed;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ReportService"/> class.
@@ -39,8 +40,10 @@ public sealed class ReportService
     /// <param name="store">The report store.</param>
     /// <param name="config">Returns the current configuration; read on every call.</param>
     /// <param name="time">The clock.</param>
-    public ReportService(ILibraryManager library, IUserManager users, PlaybackCapture capture, ReportStore store, Func<PluginConfiguration> config, TimeProvider time)
+    /// <param name="filed">Told about each report once it is stored, for the admin's alerts.</param>
+    public ReportService(ILibraryManager library, IUserManager users, PlaybackCapture capture, ReportStore store, Func<PluginConfiguration> config, TimeProvider time, Action<StoredReport>? filed = null)
     {
+        _filed = filed;
         _library = library;
         _users = users;
         _capture = capture;
@@ -159,6 +162,7 @@ public sealed class ReportService
             Snapshot = playback is null ? null : ReportSnapshot.FromPlayback(playback),
         });
 
+        _filed?.Invoke(_store.GetReport(filed.ReportId)!);
         var issue = _store.GetIssue(filed.IssueId)!;
         return ServiceResult<FiledReportView>.Success(new FiledReportView
         {

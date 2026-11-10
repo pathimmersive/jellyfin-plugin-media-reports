@@ -17,6 +17,7 @@ Not distributed with the plugin.
 
 | Package | License |
 |---|---|
+| Microsoft.Extensions.TimeProvider.Testing | MIT |
 | Microsoft.NET.Test.Sdk | MIT |
 | Moq | BSD-3-Clause |
 | SkiaSharp | MIT |

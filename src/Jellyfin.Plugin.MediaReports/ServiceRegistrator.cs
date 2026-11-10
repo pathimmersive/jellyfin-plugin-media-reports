@@ -1,4 +1,5 @@
 using System;
+using System.Net.Http;
 using Jellyfin.Data.Events.Users;
 using Jellyfin.Plugin.MediaReports.Api;
 using Jellyfin.Plugin.MediaReports.Configuration;
@@ -6,9 +7,12 @@ using Jellyfin.Plugin.MediaReports.Notifications;
 using Jellyfin.Plugin.MediaReports.Playback;
 using Jellyfin.Plugin.MediaReports.Storage;
 using Jellyfin.Plugin.MediaReports.Web;
-using MediaBrowser.Controller.Events;
+using MediaBrowser.Common.Configuration;
+using MediaBrowser.Common.Net;
 using MediaBrowser.Controller;
+using MediaBrowser.Controller.Events;
 using MediaBrowser.Controller.Plugins;
+using MediaBrowser.Model.Activity;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -37,7 +41,15 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
             provider.GetRequiredService<PlaybackCapture>(),
             provider.GetRequiredService<ReportStore>(),
             () => Plugin.Instance?.Configuration ?? new PluginConfiguration(),
-            TimeProvider.System));
+            TimeProvider.System,
+            report => provider.GetRequiredService<ReportAlerts>().Filed(report)));
+        serviceCollection.AddSingleton(provider => new ReportAlerts(
+            () => provider.GetRequiredService<IHttpClientFactory>().CreateClient(NamedClient.Default),
+            provider.GetRequiredService<IActivityManager>(),
+            () => Plugin.Instance?.Configuration ?? new PluginConfiguration(),
+            () => ServerUrl(applicationHost, provider.GetRequiredService<IConfigurationManager>()),
+            TimeProvider.System,
+            provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ReportAlerts>>()));
         serviceCollection.AddSingleton(provider => new ReporterNotifier(
             provider.GetRequiredService<MediaBrowser.Controller.Session.ISessionManager>(),
             provider.GetRequiredService<ReportStore>(),
@@ -58,5 +70,21 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
             config => Plugin.Instance?.UpdateConfiguration(config)));
         serviceCollection.AddScoped<IEventConsumer<UserDeletedEventArgs>, UserDeletedConsumer>();
         serviceCollection.AddTransient<IStartupFilter, IndexPageStartupFilter>();
+    }
+
+    // The published address for every client (or for external ones) when one is set, else the local one.
+    private static string ServerUrl(IServerApplicationHost host, IConfigurationManager configuration)
+    {
+        foreach (var entry in configuration.GetNetworkConfiguration().PublishedServerUriBySubnet ?? [])
+        {
+            var parts = entry.Split('=', 2, StringSplitOptions.TrimEntries);
+            if (parts.Length == 2 && parts[0].ToLowerInvariant() is "all" or "external" or "0.0.0.0/0"
+                && Uri.TryCreate(parts[1], UriKind.Absolute, out var uri))
+            {
+                return uri.ToString().TrimEnd('/');
+            }
+        }
+
+        return host.GetApiUrlForLocalAccess(null, true);
     }
 }

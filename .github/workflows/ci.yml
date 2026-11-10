@@ -47,6 +47,8 @@ jobs:
       - run: bash scripts/smoke-admin.sh
       # Files reports with a webhook receiver beside the server and checks the admin's alerts.
       - run: bash scripts/smoke-alerts.sh
+      # Reads the metrics with an API key and lets a Prometheus container scrape the server.
+      - run: bash scripts/smoke-metrics.sh
       # Drives Jellyfin Web in headless Chromium and checks where the Report button appears.
       - name: Install Playwright for the web smoke
         run: |

@@ -34,6 +34,9 @@ public sealed record AdminSettings
 
     /// <summary>Gets the generic JSON webhook address; empty sends nothing.</summary>
     public string WebhookUrl { get; init; } = string.Empty;
+
+    /// <summary>Gets the address Prometheus scrapes the plugin's metrics from.</summary>
+    public string MetricsUrl { get; init; } = string.Empty;
 }
 
 /// <summary>

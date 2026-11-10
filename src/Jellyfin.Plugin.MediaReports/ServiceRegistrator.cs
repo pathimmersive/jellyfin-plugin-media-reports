@@ -42,7 +42,15 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
             provider.GetRequiredService<ReportStore>(),
             () => Plugin.Instance?.Configuration ?? new PluginConfiguration(),
             TimeProvider.System,
-            report => provider.GetRequiredService<ReportAlerts>().Filed(report)));
+            report =>
+            {
+                provider.GetRequiredService<ReportMetrics>().Filed(report);
+                provider.GetRequiredService<ReportAlerts>().Filed(report);
+            }));
+        serviceCollection.AddSingleton(provider => new ReportMetrics(
+            provider.GetRequiredService<ReportStore>(),
+            () => Plugin.Instance?.Configuration ?? new PluginConfiguration(),
+            typeof(Plugin).Assembly.GetName().Version?.ToString() ?? "0.0.0.0"));
         serviceCollection.AddSingleton(provider => new ReportAlerts(
             () => provider.GetRequiredService<IHttpClientFactory>().CreateClient(NamedClient.Default),
             provider.GetRequiredService<IActivityManager>(),
@@ -67,7 +75,8 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton(provider => new SettingsService(
             provider.GetRequiredService<ReportStore>(),
             () => Plugin.Instance?.Configuration ?? new PluginConfiguration(),
-            config => Plugin.Instance?.UpdateConfiguration(config)));
+            config => Plugin.Instance?.UpdateConfiguration(config),
+            () => ServerUrl(applicationHost, provider.GetRequiredService<IConfigurationManager>())));
         serviceCollection.AddScoped<IEventConsumer<UserDeletedEventArgs>, UserDeletedConsumer>();
         serviceCollection.AddTransient<IStartupFilter, IndexPageStartupFilter>();
     }

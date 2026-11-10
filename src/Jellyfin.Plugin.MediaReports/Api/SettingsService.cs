@@ -23,6 +23,7 @@ public sealed class SettingsService
     private readonly ReportStore _store;
     private readonly Func<PluginConfiguration> _config;
     private readonly Action<PluginConfiguration> _save;
+    private readonly Func<string> _serverUrl;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SettingsService"/> class.
@@ -30,18 +31,23 @@ public sealed class SettingsService
     /// <param name="store">The report store, for report counts and the codes reports use.</param>
     /// <param name="config">Returns the current configuration; read on every call.</param>
     /// <param name="save">Saves a new configuration, which readers then see without a restart.</param>
-    public SettingsService(ReportStore store, Func<PluginConfiguration> config, Action<PluginConfiguration> save)
+    /// <param name="serverUrl">Returns the server's address, published when one is set, for the metrics address.</param>
+    public SettingsService(ReportStore store, Func<PluginConfiguration> config, Action<PluginConfiguration> save, Func<string>? serverUrl = null)
     {
         _store = store;
         _config = config;
         _save = save;
+        _serverUrl = serverUrl ?? (() => string.Empty);
     }
 
     /// <summary>
     /// Gets the settings, with each reason's report count.
     /// </summary>
     /// <returns>The settings.</returns>
-    public AdminSettings Get() => Settings(_config(), _store.GetReasonReportCounts());
+    public AdminSettings Get() => Settings(_config(), _store.GetReasonReportCounts()) with
+    {
+        MetricsUrl = _serverUrl().TrimEnd('/') + "/MediaReports/Metrics",
+    };
 
     /// <summary>
     /// Checks and saves a change to the settings.

@@ -71,7 +71,7 @@ while IFS= read -r image; do
     { [[ "$image" == *.svg ]] && grep -qi jellyfin "$image"; }; then
     fail "$image looks like a Jellyfin brand asset"
   fi
-done < <(find . \( -path ./.git -o -path ./artifacts -o -name bin -o -name obj \) -prune -o \
+done < <(find . \( -path ./.git -o -path ./artifacts -o -name bin -o -name obj -o -name node_modules \) -prune -o \
   -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.gif' -o -iname '*.svg' \
   -o -iname '*.ico' -o -iname '*.webp' \) -print)
 

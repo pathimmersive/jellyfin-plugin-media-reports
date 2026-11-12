@@ -274,6 +274,8 @@
         + '.mediaReportsDialog.mr-remote *:focus{outline:none;background:#00a4dc;border-color:#00a4dc;color:rgba(0,0,0,.87);}'
         + '.mediaReportsDialog.mr-remote .mediaReportsReason:focus:before{border-color:rgba(0,0,0,.87);}'
         + '.mediaReportsDialog.mr-remote .mediaReportsReason[aria-pressed=true]:focus:before{background:rgba(0,0,0,.87);box-shadow:inset 0 0 0 3px #00a4dc;}'
+        + '.mediaReportsDialog :focus{outline:2px solid #00a4dc;outline-offset:2px;}'
+        + '.mediaReportsDialog :focus:not(:focus-visible){outline:none;}'
         + '.mediaReportsDialog :focus-visible{outline:2px solid #00a4dc;outline-offset:2px;}'
         // My Reports: rows with an unread dot and a status pill, the detail, and Withdraw.
         + '.mediaReportsList{list-style:none;margin:16px 0 0;padding:0;}'

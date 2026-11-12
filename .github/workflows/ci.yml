@@ -26,6 +26,11 @@ jobs:
       - run: dotnet build -c Release
       - run: dotnet test -c Release --no-build
       - run: bash scripts/check-repo-docs.sh
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      # The Report button script against Chromium 38 (webOS 3): syntax, web APIs and CSS.
+      - run: bash scripts/check-reporter-compat.sh
 
   smoke:
     runs-on: ubuntu-24.04

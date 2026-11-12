@@ -10,13 +10,14 @@ Thanks for helping. Bug reports, ideas and pull requests are all welcome.
 
 ## Building and testing
 
-You need the .NET 10 SDK (pinned in `global.json`) and Docker.
+You need the .NET 10 SDK (pinned in `global.json`), Docker, and Node.js 22 or later for the compatibility check.
 
 ```bash
 dotnet test                          # unit tests
 bash scripts/smoke-load.sh           # the plugin loads on Jellyfin 12.0, 12.1 and the latest 12.x
 bash scripts/repo-install-check.sh   # Jellyfin installs it from a plugin repository and loads it
 bash scripts/check-repo-docs.sh      # repository documents and third-party notices are complete
+bash scripts/check-reporter-compat.sh # reporter.js works on Chromium 38, the oldest TV browser supported
 ```
 
 The logo's SVG files in `assets/logo` are its source. After changing one, run `dotnet run scripts/render-logo.cs` to remake the PNGs; `scripts/check-repo-docs.sh` fails when a PNG no longer matches its SVG.

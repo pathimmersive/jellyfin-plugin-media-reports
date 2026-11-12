@@ -145,6 +145,12 @@ const STYLES = `
 .mrHook label{font-size:14px;color:var(--mr-muted)}
 .mrHook .mrInput{width:100%}
 .mrHook .mrOk,.mrHook .mrBad{margin:0}
+.mrMetrics{display:flex;flex-direction:column;border-top:1px solid rgba(255,255,255,.12);padding-top:16px}
+.mrMetrics>*+*{margin-top:8px}
+.mrCopyRow{display:flex;flex-wrap:wrap;align-items:center;margin:-4px}
+.mrCopyRow>*{margin:4px}
+.mrCopyRow .mrInput{flex:1 1 260px;min-width:0}
+.mrScrape{margin:0;padding:12px;background:#141414;border-radius:4px;font-family:monospace;font-size:13px;white-space:pre;overflow-x:auto;max-width:100%;box-sizing:border-box}
 .mrCheck{display:flex;align-items:flex-start;font-size:15px;color:#fff;cursor:pointer}
 .mrCheck input{width:20px;height:20px;margin:1px 12px 0 0;flex-shrink:0;accent-color:var(--mr-accent)}
 .mrSave{display:flex;flex-wrap:wrap;align-items:center}
@@ -683,6 +689,60 @@ function issuePage(params, issue, navigate) {
 
 // ---- The Settings tab -----------------------------------------------------------------
 
+// The scrape config Prometheus needs for the metrics address, with the API key left to fill in.
+function scrapeConfig(metricsUrl) {
+    let url;
+    try {
+        url = new URL(metricsUrl);
+    } catch (e) {
+        return '';
+    }
+    return ['scrape_configs:',
+        '  - job_name: media-reports',
+        `    scheme: ${url.protocol.replace(':', '')}`,
+        `    metrics_path: ${url.pathname}`,
+        '    authorization:',
+        '      type: MediaBrowser',
+        "      credentials: 'Token=\"<API key>\"'",
+        '    static_configs:',
+        `      - targets: ['${url.host}']`].join('\n');
+}
+
+// Copies text; the Dashboard is often served over plain http, where the Clipboard API is missing.
+function copyText(text, from) {
+    if (navigator.clipboard && window.isSecureContext) {
+        return navigator.clipboard.writeText(text);
+    }
+    from.removeAttribute('readonly');
+    from.select();
+    const done = document.execCommand('copy');
+    from.setAttribute('readonly', '');
+    return done ? Promise.resolve() : Promise.reject(new Error('copy'));
+}
+
+function metricsBlock(metricsUrl) {
+    const address = h('input', { className: 'mrInput mrMetricsUrl', id: 'mrMetricsUrl', type: 'text', readonly: true, value: metricsUrl });
+    const scrape = scrapeConfig(metricsUrl);
+    const config = h('textarea', { className: 'mrScrape', id: 'mrScrape', readonly: true, rows: scrape.split('\n').length, 'aria-label': 'Prometheus scrape config' }, scrape);
+    const note = h('span', { className: 'mrOk', role: 'status' });
+    const copy = (text, from) => () => copyText(text, from).then(() => {
+        note.className = 'mrOk';
+        note.textContent = 'Copied';
+    }, () => {
+        note.className = 'mrBad';
+        note.textContent = 'Select it and copy it by hand.';
+    });
+    return h('div', { className: 'mrMetrics' },
+        h('label', { for: 'mrMetricsUrl', style: 'font-size:14px;color:var(--mr-muted)' }, 'Prometheus metrics address'),
+        h('div', { className: 'mrCopyRow' }, address,
+            h('button', { type: 'button', className: 'mrBtn mrCopyUrl', onclick: copy(metricsUrl, address) }, icon('content_copy'), 'Copy'),
+            h('button', { type: 'button', className: 'mrBtn mrCopyScrape', onclick: copy(scrape, config) }, icon('content_copy'), 'Copy scrape config'),
+            note),
+        h('p', { className: 'mrFaint', style: 'margin:0' },
+            'Create an API key for it in Dashboard → API Keys and put it in place of <API key>. Counts carry reasons and client names only, never titles, paths or user names.'),
+        config);
+}
+
 // A refused save answers 400 with the field at fault, and the reason's position for a reason.
 function settingsRefusal(failure) {
     if (failure && failure.status === 400 && typeof failure.json === 'function') {
@@ -912,7 +972,8 @@ function settingsPage(settings) {
             h('p', { className: 'mrFaint' }, "Each new report is posted here within a minute; reports filed in the same minute come as one message. Every report is also in Jellyfin's activity log."),
             hooks.map((hook) => h('div', { className: 'mrHook' }, h('label', { for: hook.id }, hook.label), hook.input, hook.note)),
             h('div', null, testButton),
-            testNote),
+            testNote,
+            metricsBlock(settings.MetricsUrl)),
         h('section', { className: 'mrCard', 'aria-labelledby': 'mrKeepingHead' },
             h('h2', { className: 'mrH3', id: 'mrKeepingHead' }, 'Keeping reports'),
             h('p', { style: 'margin:0;display:flex;flex-wrap:wrap;align-items:center' },

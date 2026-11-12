@@ -4,7 +4,7 @@
 # Chromium as the admin, at 1280 and 390 px: the menu entry and its count, the Reports
 # tab with its states, views, grouping, rollup, filters, sort and paging, one issue
 # with its reports, file, history, status, notes and quick actions, and the Settings tab
-# with its Alerts section.
+# with its Alerts section and the metrics address.
 #
 # Usage: scripts/smoke-triage.sh [--keep]
 #   --keep  leave the server running after setup and skip the browser checks
@@ -583,6 +583,11 @@ with sync_playwright() as p:
     check(page.locator(V + "#mrDiscordNote").inner_text().strip() == "Test alert failed: Answered 405",
           "Send a test alert shows the address's answer beside it (%s)" % page.locator(V + "#mrDiscordNote").inner_text().strip())
     ok("PUT", "/MediaReports/Admin/Settings", ADMIN, {"DiscordWebhookUrl": "", "WebhookUrl": ""})
+    scrape = page.locator(V + "#mrScrape").input_value()
+    check(page.locator(V + "#mrMetricsUrl").input_value().endswith("/MediaReports/Metrics")
+          and "metrics_path: /MediaReports/Metrics" in scrape and "type: MediaBrowser" in scrape and "<API key>" in scrape
+          and page.locator(V + ".mrCopyUrl").count() == 1 and page.locator(V + ".mrCopyScrape").count() == 1,
+          "the Alerts section shows the metrics address and a scrape config to copy")
 
     with page.expect_download(timeout=WAIT_MS) as download_info:
         page.locator(V + ".mrExport").click()

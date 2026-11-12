@@ -588,6 +588,29 @@ public sealed class ReportStore
     }
 
     /// <summary>
+    /// Counts open issues by reason code and status, for the metrics.
+    /// </summary>
+    /// <returns>One count per reason and status that has open issues.</returns>
+    public IReadOnlyList<(string Reason, string Status, int Count)> GetOpenIssueCounts()
+    {
+        using var connection = _db.OpenConnection();
+        return Rows(
+            connection,
+            "SELECT reason_code, status, COUNT(*) FROM issue WHERE closed_at IS NULL GROUP BY reason_code, status ORDER BY reason_code, status",
+            r => (r.GetString(0), r.GetString(1), r.GetInt32(2)));
+    }
+
+    /// <summary>
+    /// Counts the reports in open issues, for the metrics.
+    /// </summary>
+    /// <returns>The count.</returns>
+    public long GetOpenReportCount()
+    {
+        using var connection = _db.OpenConnection();
+        return Scalar<long>(connection, "SELECT COUNT(*) FROM report r JOIN issue i ON i.id = r.issue_id WHERE i.closed_at IS NULL");
+    }
+
+    /// <summary>
     /// Gets every reason code a stored issue or report uses, so a new reason never takes one.
     /// </summary>
     /// <returns>The codes.</returns>

@@ -1,0 +1,14 @@
+{
+  "name": "media-reports-compat-check",
+  "private": true,
+  "description": "Checks reporter.js against the oldest browser the Report button supports.",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "browserslist": ["chrome 38"],
+  "devDependencies": {
+    "@mdn/browser-compat-data": "8.1.7",
+    "doiuse": "6.0.6",
+    "espree": "11.2.0",
+    "postcss": "8.5.32"
+  }
+}

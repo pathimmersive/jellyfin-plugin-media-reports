@@ -17,9 +17,13 @@ Not distributed with the plugin.
 
 | Package | License |
 |---|---|
+| @mdn/browser-compat-data | CC0-1.0 |
+| doiuse | MIT |
+| espree | BSD-2-Clause |
 | Microsoft.Extensions.TimeProvider.Testing | MIT |
 | Microsoft.NET.Test.Sdk | MIT |
 | Moq | BSD-3-Clause |
+| postcss | MIT |
 | SkiaSharp | MIT |
 | SkiaSharp.NativeAssets.Linux.NoDependencies | MIT |
 | Svg.Skia | MIT |

@@ -5,6 +5,7 @@ using Jellyfin.Plugin.MediaReports.Api;
 using Jellyfin.Plugin.MediaReports.Configuration;
 using Jellyfin.Plugin.MediaReports.Notifications;
 using Jellyfin.Plugin.MediaReports.Playback;
+using Jellyfin.Plugin.MediaReports.Relink;
 using Jellyfin.Plugin.MediaReports.Storage;
 using Jellyfin.Plugin.MediaReports.Web;
 using MediaBrowser.Common.Configuration;
@@ -35,6 +36,12 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
             TimeProvider.System,
             () => Plugin.Instance?.Configuration.ReportRetentionDays ?? 365));
         serviceCollection.AddHostedService<StorageStartup>();
+        serviceCollection.AddSingleton(provider => new LibraryRelink(
+            provider.GetRequiredService<MediaBrowser.Controller.Library.ILibraryManager>(),
+            new JellyfinRelinkLibrary(provider.GetRequiredService<MediaBrowser.Controller.Library.ILibraryManager>()),
+            provider.GetRequiredService<ReportStore>(),
+            provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<LibraryRelink>>()));
+        serviceCollection.AddHostedService(provider => provider.GetRequiredService<LibraryRelink>());
         serviceCollection.AddSingleton(provider => new ReportService(
             provider.GetRequiredService<MediaBrowser.Controller.Library.ILibraryManager>(),
             provider.GetRequiredService<MediaBrowser.Controller.Library.IUserManager>(),

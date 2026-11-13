@@ -73,6 +73,9 @@ public sealed record PlaybackEntry
 
     /// <summary>Gets the item's source media streams.</summary>
     public IReadOnlyList<SourceStream> SourceStreams { get; init; } = [];
+
+    /// <summary>Gets the source's overall bitrate.</summary>
+    public int? SourceBitrate { get; init; }
 }
 
 /// <summary>
@@ -139,4 +142,7 @@ public sealed record SourceStream
 
     /// <summary>Gets the channel count.</summary>
     public int? Channels { get; init; }
+
+    /// <summary>Gets the frame rate, for a video stream.</summary>
+    public float? FrameRate { get; init; }
 }

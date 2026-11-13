@@ -605,6 +605,85 @@ public sealed class ReportStore
     }
 
     /// <summary>
+    /// The days a finding is kept after it was last seen.
+    /// </summary>
+    public const int FindingDays = 30;
+
+    /// <summary>
+    /// Adds a finding, or updates the one already kept for its playback and kind with the time
+    /// and what was seen.
+    /// </summary>
+    /// <param name="finding">The finding.</param>
+    /// <returns>True when it was added; false when an existing one was updated.</returns>
+    public bool SaveFinding(NewFinding finding)
+    {
+        ArgumentNullException.ThrowIfNull(finding);
+        var now = Now();
+        using var connection = _db.OpenConnection();
+        using var transaction = Transaction.Begin(connection, immediate: true);
+        var existing = Scalar<long?>(connection, "SELECT id FROM finding WHERE playback_key = $key AND kind = $kind", ("$key", finding.PlaybackKey), ("$kind", finding.Kind));
+        if (existing is { } id)
+        {
+            Execute(connection, "UPDATE finding SET last_seen = $now, detail = $detail WHERE id = $id", ("$now", now), ("$detail", finding.Detail), ("$id", id));
+        }
+        else
+        {
+            Execute(
+                connection,
+                """
+                INSERT INTO finding (kind, playback_key, item_id, item_type, title, series_id, series_name, season_number, episode_number,
+                    user_id, user_name, device, client, first_seen, last_seen, detail)
+                VALUES ($kind, $key, $item, $type, $title, $series, $seriesName, $season, $episode, $user, $userName, $device, $client, $now, $now, $detail)
+                """,
+                ("$kind", finding.Kind),
+                ("$key", finding.PlaybackKey),
+                ("$item", Id(finding.ItemId)),
+                ("$type", finding.ItemType),
+                ("$title", finding.Title),
+                ("$series", finding.SeriesId is { } s ? Id(s) : null),
+                ("$seriesName", finding.SeriesName),
+                ("$season", finding.SeasonNumber),
+                ("$episode", finding.EpisodeNumber),
+                ("$user", finding.UserId is { } u ? Id(u) : null),
+                ("$userName", finding.UserName),
+                ("$device", finding.Device),
+                ("$client", finding.Client),
+                ("$now", now),
+                ("$detail", finding.Detail));
+        }
+
+        transaction.Commit();
+        return existing is null;
+    }
+
+    /// <summary>
+    /// Counts the findings last seen in the past days and not dismissed, by kind.
+    /// </summary>
+    /// <param name="days">The days to look back.</param>
+    /// <returns>The counts, by kind.</returns>
+    public IReadOnlyDictionary<string, int> GetRecentFindingCounts(int days)
+    {
+        using var connection = _db.OpenConnection();
+        return Rows(
+            connection,
+            "SELECT kind, COUNT(*) FROM finding WHERE last_seen >= $since AND dismissed_at IS NULL GROUP BY kind ORDER BY kind",
+            r => (Kind: r.GetString(0), Count: r.GetInt32(1)),
+            ("$since", Time(_time.GetUtcNow() - TimeSpan.FromDays(days))))
+            .ToDictionary(r => r.Kind, r => r.Count, StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// Deletes findings last seen more than <see cref="FindingDays"/> days ago, dismissed or not.
+    /// </summary>
+    /// <returns>How many were deleted.</returns>
+    public int PurgeFindings()
+    {
+        using var connection = _db.OpenConnection();
+        using var command = Command(connection, "DELETE FROM finding WHERE last_seen < $cutoff", [("$cutoff", Time(_time.GetUtcNow() - TimeSpan.FromDays(FindingDays)))]);
+        return command.ExecuteNonQuery();
+    }
+
+    /// <summary>
     /// Records now as when an admin last opened the Reports tab.
     /// </summary>
     /// <param name="adminUserId">The admin.</param>

@@ -361,3 +361,51 @@ public sealed record StoredEvent
 /// <param name="LastLoad">When the Report button last loaded in it.</param>
 /// <param name="LastPlay">When a playback last started in it.</param>
 public sealed record ClientSeen(string Client, string? Version, DateTimeOffset FirstSeen, DateTimeOffset? LastLoad, DateTimeOffset? LastPlay);
+
+/// <summary>
+/// A suspected problem to keep: one per playback and kind.
+/// </summary>
+public sealed record NewFinding
+{
+    /// <summary>Gets the kind.</summary>
+    public required string Kind { get; init; }
+
+    /// <summary>Gets the playback it was seen in: the session and item.</summary>
+    public required string PlaybackKey { get; init; }
+
+    /// <summary>Gets the item.</summary>
+    public Guid ItemId { get; init; }
+
+    /// <summary>Gets the item type.</summary>
+    public string? ItemType { get; init; }
+
+    /// <summary>Gets the title.</summary>
+    public string Title { get; init; } = string.Empty;
+
+    /// <summary>Gets the series, for an episode.</summary>
+    public Guid? SeriesId { get; init; }
+
+    /// <summary>Gets the series name.</summary>
+    public string? SeriesName { get; init; }
+
+    /// <summary>Gets the season number.</summary>
+    public int? SeasonNumber { get; init; }
+
+    /// <summary>Gets the episode number.</summary>
+    public int? EpisodeNumber { get; init; }
+
+    /// <summary>Gets the user.</summary>
+    public Guid? UserId { get; init; }
+
+    /// <summary>Gets the user's name.</summary>
+    public string? UserName { get; init; }
+
+    /// <summary>Gets the device name.</summary>
+    public string? Device { get; init; }
+
+    /// <summary>Gets the client name.</summary>
+    public string? Client { get; init; }
+
+    /// <summary>Gets what the server saw, in words.</summary>
+    public string Detail { get; init; } = string.Empty;
+}

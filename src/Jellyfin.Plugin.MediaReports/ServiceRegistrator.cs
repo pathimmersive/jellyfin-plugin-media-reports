@@ -27,7 +27,18 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
     /// <inheritdoc />
     public void RegisterServices(IServiceCollection serviceCollection, IServerApplicationHost applicationHost)
     {
-        serviceCollection.AddSingleton<PlaybackCapture>();
+        serviceCollection.AddSingleton(provider => new PlaybackCapture(
+            provider.GetRequiredService<MediaBrowser.Controller.Session.ISessionManager>(),
+            provider.GetRequiredService<MediaBrowser.Controller.Library.ILibraryManager>())
+        {
+            Samples = sample => provider.GetRequiredService<SuspectWatcher>().Queue(sample),
+        });
+        serviceCollection.AddSingleton(provider => new SuspectWatcher(
+            provider.GetRequiredService<ReportStore>(),
+            () => Plugin.Instance?.Configuration ?? new PluginConfiguration(),
+            FindingTitles(provider.GetRequiredService<MediaBrowser.Controller.Library.ILibraryManager>()),
+            (kind, client) => provider.GetRequiredService<ReportMetrics>().SuspectAdded(kind, client),
+            provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<SuspectWatcher>>()));
         serviceCollection.AddHostedService(provider => provider.GetRequiredService<PlaybackCapture>());
 
         serviceCollection.AddSingleton<ReportDatabase>();
@@ -95,6 +106,15 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddScoped<IEventConsumer<UserDeletedEventArgs>, UserDeletedConsumer>();
         serviceCollection.AddTransient<IStartupFilter, IndexPageStartupFilter>();
     }
+
+    // Names a title for a finding from the library: the episode with its series and numbers.
+    private static Func<Guid, FindingTitle?> FindingTitles(MediaBrowser.Controller.Library.ILibraryManager library) => id =>
+        library.GetItemById(id) switch
+        {
+            null => null,
+            MediaBrowser.Controller.Entities.TV.Episode e => new FindingTitle("Episode", e.Name, e.SeriesId, e.SeriesName, e.ParentIndexNumber, e.IndexNumber),
+            var item => new FindingTitle(item.GetType().Name, item.Name, null, null, null, null),
+        };
 
     // The published address for every client (or for external ones) when one is set, else the local one.
     private static string ServerUrl(IServerApplicationHost host, IConfigurationManager configuration)

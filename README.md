@@ -89,6 +89,14 @@ Everything stays on your Jellyfin server. Data leaves the server only through th
 
 `plugin_state`: `key` and `value`, a few named values kept across restarts: whether the Report button counts as stopped, and when reporting was last turned back on.
 
+`finding`: one row per suspected problem the plugin noticed on its own, one per playback and kind. It never becomes a report or an issue, and is deleted 30 days after it was last seen.
+
+- `id`, `kind` (freezing, slow-transcode, low-quality, playback-error), `playback_key` (the session and item it was seen in).
+- `item_id`, `item_type`, `title`, `series_id`, `series_name`, `season_number`, `episode_number`: what was playing.
+- `user_id`, `user_name`, `device`, `client`: who was watching, and on what.
+- `first_seen`, `last_seen`, `detail` (what the server saw, in words), `dismissed_at`.
+- It holds no file path or IP address.
+
 ### Who sees what
 
 Admins see everything above. A user sees only their own reports, with the status and its history, never another user's reports, the file path or the admin's notes.
@@ -97,6 +105,7 @@ Admins see everything above. A user sees only their own reports, with the status
 
 - Open reports are never deleted.
 - Closed reports are deleted, with their history, 365 days after they closed by the daily **Purge closed media reports** task. Change the period in the plugin's settings; 0 keeps them forever.
+- Suspected problems are deleted by the same task 30 days after they were last seen.
 - When a Jellyfin user is deleted, their reports are kept for the admin, but their user id, user name and device names are removed from them.
 - Users can withdraw their own report while it is still New.
 

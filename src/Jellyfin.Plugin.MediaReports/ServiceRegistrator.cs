@@ -65,6 +65,14 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
             () => ServerUrl(applicationHost, provider.GetRequiredService<IConfigurationManager>()),
             TimeProvider.System,
             provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ReportAlerts>>()));
+        serviceCollection.AddSingleton(provider => new ButtonWatch(
+            provider.GetRequiredService<MediaBrowser.Controller.Session.ISessionManager>(),
+            provider.GetRequiredService<ReportStore>(),
+            () => Plugin.Instance?.Configuration ?? new PluginConfiguration(),
+            stopped => provider.GetRequiredService<ReportAlerts>().SendButtonAsync(stopped),
+            TimeProvider.System,
+            provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ButtonWatch>>()));
+        serviceCollection.AddHostedService(provider => provider.GetRequiredService<ButtonWatch>());
         serviceCollection.AddSingleton(provider => new ReporterNotifier(
             provider.GetRequiredService<MediaBrowser.Controller.Session.ISessionManager>(),
             provider.GetRequiredService<ReportStore>(),

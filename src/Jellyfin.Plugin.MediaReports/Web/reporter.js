@@ -344,9 +344,9 @@
         if (!api) {
             return Promise.reject({ status: 0 });
         }
-        // A DELETE and a Hide answer 204 with no body to parse.
+        // A DELETE, a Hide and a load signal answer 204 with no body to parse.
         var request = { type: method, url: api.getUrl(path, query || {}) };
-        if (method !== 'DELETE' && !/\/Hide$/.test(path)) {
+        if (method !== 'DELETE' && !/\/(Hide|Loaded)$/.test(path)) {
             request.dataType = 'json';
         }
         if (body) {
@@ -1247,6 +1247,31 @@
 
     // ---- Start --------------------------------------------------------------------------
 
+    // Tells the server once per page load that the script loaded, so the admin hears when a
+    // Jellyfin update stops it loading. Waits until someone is signed in.
+    var loadSignalled = false;
+    function decoded(text) {
+        try {
+            return decodeURIComponent(text || '');
+        } catch (error) {
+            return text || '';
+        }
+    }
+
+    function signalLoad() {
+        var api = client();
+        if (loadSignalled || !api) {
+            return;
+        }
+        loadSignalled = true;
+        // ApiClient keeps the name and version URL-encoded for its authorization header.
+        var name = decoded(typeof api.appName === 'function' ? api.appName() : '');
+        var version = decoded(typeof api.appVersion === 'function' ? api.appVersion() : '');
+        call('POST', 'MediaReports/Client/Loaded', null, { Client: name || 'Unknown', Version: version || null }).then(null, function (error) {
+            warn('could not send the load signal', error);
+        });
+    }
+
     function start() {
         var queued = false;
         var observer = new window.MutationObserver(function () {
@@ -1254,6 +1279,7 @@
                 queued = true;
                 window.setTimeout(function () {
                     queued = false;
+                    signalLoad();
                     placeAll();
                 }, 50);
             }
@@ -1273,6 +1299,7 @@
                 warn('could not open the report dialog', error);
             }
         });
+        signalLoad();
         placeAll();
     }
 

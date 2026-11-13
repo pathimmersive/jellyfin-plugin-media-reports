@@ -351,3 +351,13 @@ public sealed record StoredEvent
     /// <summary>Gets a short detail.</summary>
     public string? Detail { get; init; }
 }
+
+/// <summary>
+/// A client the plugin has seen: where the Report button last loaded and web playback last started.
+/// </summary>
+/// <param name="Client">The client name.</param>
+/// <param name="Version">The client version last seen.</param>
+/// <param name="FirstSeen">When the row was first written.</param>
+/// <param name="LastLoad">When the Report button last loaded in it.</param>
+/// <param name="LastPlay">When a playback last started in it.</param>
+public sealed record ClientSeen(string Client, string? Version, DateTimeOffset FirstSeen, DateTimeOffset? LastLoad, DateTimeOffset? LastPlay);

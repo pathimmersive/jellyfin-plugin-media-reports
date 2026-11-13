@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Linq;
 using System.Text;
 using Jellyfin.Plugin.MediaReports.Configuration;
+using Jellyfin.Plugin.MediaReports.Notifications;
 using Jellyfin.Plugin.MediaReports.Storage;
 
 namespace Jellyfin.Plugin.MediaReports.Api;
@@ -23,6 +24,7 @@ public sealed class ReportMetrics
     private readonly ReportStore _store;
     private readonly Func<PluginConfiguration> _config;
     private readonly string _version;
+    private readonly TimeProvider _time;
     private readonly ConcurrentDictionary<(string Reason, string Client), long> _filed = new();
 
     /// <summary>
@@ -31,11 +33,13 @@ public sealed class ReportMetrics
     /// <param name="store">The report store, read on every scrape.</param>
     /// <param name="config">Returns the current configuration.</param>
     /// <param name="version">The plugin's version.</param>
-    public ReportMetrics(ReportStore store, Func<PluginConfiguration> config, string version)
+    /// <param name="time">The clock; the system clock when null.</param>
+    public ReportMetrics(ReportStore store, Func<PluginConfiguration> config, string version, TimeProvider? time = null)
     {
         _store = store;
         _config = config;
         _version = version;
+        _time = time ?? TimeProvider.System;
     }
 
     /// <summary>
@@ -57,10 +61,14 @@ public sealed class ReportMetrics
     {
         IReadOnlyList<(string Reason, string Status, int Count)>? issues = null;
         var openReports = 0L;
+        IReadOnlyList<ClientSeen> clients = [];
+        ButtonStatus? button = null;
         try
         {
             issues = _store.GetOpenIssueCounts();
             openReports = _store.GetOpenReportCount();
+            clients = _store.GetClientsSeen();
+            button = ButtonWatch.Evaluate(_store, _config(), _time.GetUtcNow());
         }
         catch (StorageUnavailableException)
         {
@@ -84,6 +92,14 @@ public sealed class ReportMetrics
 
             Family(text, "media_reports_open_reports", "gauge", "Reports in open issues.");
             Sample(text, "media_reports_open_reports", openReports);
+
+            Family(text, "media_reports_button_stopped", "gauge", "1 when the Report button hasn't loaded in any app for 7 days while web apps played.");
+            Sample(text, "media_reports_button_stopped", button?.Stopped == true ? 1 : 0);
+            Family(text, "media_reports_button_last_load_timestamp_seconds", "gauge", "When the Report button last loaded, by client, as Unix seconds.");
+            foreach (var client in clients.Where(c => c.LastLoad is not null))
+            {
+                Sample(text, "media_reports_button_last_load_timestamp_seconds", client.LastLoad!.Value.ToUnixTimeSeconds(), ("client", client.Client));
+            }
         }
 
         Family(text, "media_reports_reporting_enabled", "gauge", "1 when users can report problems.");

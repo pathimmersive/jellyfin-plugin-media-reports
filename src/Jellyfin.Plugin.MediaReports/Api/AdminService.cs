@@ -81,7 +81,11 @@ public sealed class AdminService
     {
         var seen = _store.GetAdminSeen(adminId);
         var open = _store.GetIssuesWithReports(closed: false);
-        var summary = new AdminSummary(open.Count, open.Sum(i => i.Reports.Count), open.Count(i => IsNew(i.Reports, seen)));
+        var summary = new AdminSummary(
+            open.Count,
+            open.Sum(i => i.Reports.Count),
+            open.Count(i => IsNew(i.Reports, seen)),
+            Notifications.ButtonWatch.Evaluate(_store, _config(), DateTimeOffset.UtcNow).Stopped);
         if (markSeen)
         {
             _store.MarkAdminSeen(adminId);

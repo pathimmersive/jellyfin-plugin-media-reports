@@ -81,6 +81,14 @@ Everything stays on your Jellyfin server. Data leaves the server only through th
 
 `admin_seen`: `user_id` and `seen_at`, when each admin last opened the report list.
 
+`client_seen`: one row per app name (such as Jellyfin Web), to warn when the Report button stops loading.
+
+- `client`, `version`: the app's name and version.
+- `first_seen`, `last_load`, `last_play`: when the row was written, when the Report button last loaded in that app, and when a playback last started in it.
+- It holds no user, device or address.
+
+`plugin_state`: `key` and `value`, a few named values kept across restarts: whether the Report button counts as stopped, and when reporting was last turned back on.
+
 ### Who sees what
 
 Admins see everything above. A user sees only their own reports, with the status and its history, never another user's reports, the file path or the admin's notes.

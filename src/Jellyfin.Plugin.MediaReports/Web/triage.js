@@ -81,6 +81,8 @@ const STYLES = `
 .mrAlert{display:flex;align-items:flex-start}
 .mrAlert>.mrIcon{color:#ffb4ab;margin-right:16px;font-size:24px}
 .mrAlert h2{font-size:18px;font-weight:600}
+.mrButtonStopped>.mrIcon{color:#f5c451}
+.mrButtonStopped p{margin:2px 0 0}
 .mrEmpty{text-align:center}
 .mrSkeleton{display:block;background:#242424;border-radius:4px;height:14px}
 .mrActions{display:flex;flex-wrap:wrap;margin:-4px}
@@ -317,11 +319,21 @@ function addStyles() {
 
 // ---- The Reports tab -------------------------------------------------------------------
 
+// The page's title and summary line, and above the tabs, the warning that the Report button
+// has stopped loading in every app.
 function header(summary) {
-    return h('div', { className: 'mrHead' },
+    const head = h('div', { className: 'mrHead' },
         h('h1', null, 'Media Reports'),
         summary ? h('span', { className: 'mrMuted mrSummary', style: 'font-size:14px' },
             `${plural(summary.OpenIssues, 'open issue', 'open issues')} from ${plural(summary.Reports, 'report', 'reports')} · ${summary.New} new since you last looked`) : null);
+    if (!summary || !summary.ButtonStopped) {
+        return head;
+    }
+    const both = document.createDocumentFragment();
+    both.append(head, h('div', { className: 'mrPanel mrAlert mrButtonStopped', role: 'status' },
+        icon('warning'),
+        h('p', null, "The Report button hasn't loaded in any app for 7 days. A Jellyfin update may have broken it.")));
+    return both;
 }
 
 function tabs(summary, active) {

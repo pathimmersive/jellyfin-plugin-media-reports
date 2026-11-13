@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Jellyfin.Plugin.MediaReports.Relink;
 using Microsoft.Data.Sqlite;
 
 namespace Jellyfin.Plugin.MediaReports.Storage;
@@ -401,6 +402,110 @@ public sealed class ReportStore
     }
 
     /// <summary>
+    /// Gets every item that has an issue, open or closed.
+    /// </summary>
+    /// <param name="openOnly">Only items with an open issue.</param>
+    /// <returns>The item ids.</returns>
+    public IReadOnlyList<Guid> GetIssueItemIds(bool openOnly = false)
+    {
+        using var connection = _db.OpenConnection();
+        return Rows(
+            connection,
+            "SELECT DISTINCT item_id FROM issue" + (openOnly ? " WHERE closed_at IS NULL" : string.Empty),
+            r => Guid.Parse(r.GetString(0)));
+    }
+
+    /// <summary>
+    /// Gets what an item with issues was when it was last reported: its type, provider ids,
+    /// series provider ids and numbers, from its newest report.
+    /// </summary>
+    /// <param name="itemId">The item.</param>
+    /// <returns>The title, or null when the item has no reports.</returns>
+    public RelinkTitle? GetReportedTitle(Guid itemId)
+    {
+        using var connection = _db.OpenConnection();
+        return Rows(
+            connection,
+            "SELECT item_id, item_type, provider_ids, series_provider_ids, season_number, episode_number FROM report WHERE item_id = $item ORDER BY created_at DESC, id DESC LIMIT 1",
+            ReadTitle,
+            ("$item", Id(itemId))).SingleOrDefault();
+    }
+
+    /// <summary>
+    /// Gets what every item with issues was when it was last reported.
+    /// </summary>
+    /// <returns>One title per item.</returns>
+    public IReadOnlyList<RelinkTitle> GetReportedTitles()
+    {
+        using var connection = _db.OpenConnection();
+        return Rows(
+            connection,
+            """
+            SELECT item_id, item_type, provider_ids, series_provider_ids, season_number, episode_number FROM report r
+            WHERE r.id = (SELECT n.id FROM report n WHERE n.item_id = r.item_id ORDER BY n.created_at DESC, n.id DESC LIMIT 1)
+            """,
+            ReadTitle);
+    }
+
+    /// <summary>
+    /// Gets whether an item has an open issue.
+    /// </summary>
+    /// <param name="itemId">The item.</param>
+    /// <returns>True when it has one.</returns>
+    public bool HasOpenIssues(Guid itemId)
+    {
+        using var connection = _db.OpenConnection();
+        return Scalar<long>(connection, "SELECT COUNT(*) FROM issue WHERE item_id = $item AND closed_at IS NULL", ("$item", Id(itemId))) > 0;
+    }
+
+    /// <summary>
+    /// Compares a movie's or episode's file with the file each of its open issues was last
+    /// checked against. An issue whose file differs becomes Replaced – verify with a "The file
+    /// changed" history line, unless it already is; either way the new file becomes its
+    /// last-checked file. An issue with no last-checked file only records this one.
+    /// </summary>
+    /// <param name="itemId">The item.</param>
+    /// <param name="size">The file's size in bytes.</param>
+    /// <param name="modified">The file's modified time.</param>
+    /// <returns>How many issues became Replaced – verify.</returns>
+    public int CheckFile(Guid itemId, long size, DateTimeOffset modified)
+    {
+        var now = Now();
+        var modifiedText = Time(modified);
+        using var connection = _db.OpenConnection();
+        using var transaction = Transaction.Begin(connection, immediate: true);
+        var issues = Rows(
+            connection,
+            "SELECT id, status, checked_file_size, checked_file_modified FROM issue WHERE item_id = $item AND closed_at IS NULL",
+            r => (Id: r.GetInt64(0), Status: Enum.Parse<IssueStatus>(r.GetString(1)), Size: r.IsDBNull(2) ? (long?)null : r.GetInt64(2), Modified: r.IsDBNull(3) ? null : r.GetString(3)),
+            ("$item", Id(itemId)));
+        var replaced = 0;
+        foreach (var issue in issues)
+        {
+            if (issue.Size == size && issue.Modified == modifiedText)
+            {
+                continue;
+            }
+
+            Execute(
+                connection,
+                "UPDATE issue SET checked_file_size = $size, checked_file_modified = $modified WHERE id = $id",
+                ("$size", size),
+                ("$modified", modifiedText),
+                ("$id", issue.Id));
+            var known = issue.Size is not null || issue.Modified is not null;
+            if (known && issue.Status != IssueStatus.ReplacedVerify)
+            {
+                SetStatus(connection, issue.Id, IssueStatus.ReplacedVerify, null, now, "The file changed");
+                replaced++;
+            }
+        }
+
+        transaction.Commit();
+        return replaced;
+    }
+
+    /// <summary>
     /// Records now as when an admin last opened the Reports tab.
     /// </summary>
     /// <param name="adminUserId">The admin.</param>
@@ -755,6 +860,14 @@ public sealed class ReportStore
         json.Remove("deviceId");
         return json.ToJsonString();
     }
+
+    private static RelinkTitle ReadTitle(SqliteDataReader r) => new(
+        Guid.Parse(r.GetString(0)),
+        r.GetString(1),
+        Map(r.GetString(2)),
+        Map(r.GetString(3)),
+        r.IsDBNull(4) ? null : r.GetInt32(4),
+        r.IsDBNull(5) ? null : r.GetInt32(5));
 
     private static StoredIssue ReadIssue(SqliteDataReader r) => new()
     {

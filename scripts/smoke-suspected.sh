@@ -121,16 +121,19 @@ call smoke box "$admin" POST /Users/New '{"Name":"alice","Password":"alice-passw
 call smoke box "$admin" POST "/Library/VirtualFolders?name=Movies&collectionType=movies&refreshLibrary=true" \
   '{"LibraryOptions":{"PathInfos":[{"Path":"/media/movies"}]}}' >/dev/null
 admin_id="$(call smoke box "$admin" GET /Users/Me | json "d['Id']")"
+# item <folder>: the movie whose file is in that folder. Jellyfin renames titles from online
+# metadata, so the path is the only stable way to find a clip.
 item() {
-  call smoke box "$admin" GET "/Items?userId=$admin_id&IncludeItemTypes=Movie&Recursive=true&searchTerm=$1" | json "d['Items'][0]['Id'] if d['Items'] else None"
+  call smoke box "$admin" GET "/Items?userId=$admin_id&IncludeItemTypes=Movie&Recursive=true&Fields=Path" |
+    py -c "import json,sys; print(next((i['Id'] for i in json.load(sys.stdin)['Items'] if '/'+sys.argv[1]+'/' in (i.get('Path') or '')), ''))" "$1"
 }
 deadline=$((SECONDS + timeout))
-until [[ -n "$(item Plain)" && -n "$(item Heavy)" ]]; do
+until [[ -n "$(item "Plain (2026)")" && -n "$(item "Heavy (2026)")" ]]; do
   (( SECONDS < deadline )) || fail "the clips did not appear in the library"
   sleep 3
 done
-plain="$(item Plain)"
-heavy="$(item Heavy)"
+plain="$(item "Plain (2026)")"
+heavy="$(item "Heavy (2026)")"
 
 # play <client> <device> <item> <profile json> <seconds> <bitrate>: signs in as alice from a TV app,
 # asks for a transcode with the profile, fetches its segments as a player would, and reports

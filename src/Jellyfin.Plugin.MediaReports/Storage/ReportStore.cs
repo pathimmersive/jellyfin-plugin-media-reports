@@ -506,6 +506,105 @@ public sealed class ReportStore
     }
 
     /// <summary>
+    /// Records that the Report button script loaded in a client, at most once a minute per client.
+    /// </summary>
+    /// <param name="client">The client name.</param>
+    /// <param name="version">The client version.</param>
+    /// <returns>True when it was recorded; false when the client's last load was under a minute ago.</returns>
+    public bool RecordLoad(string client, string? version)
+    {
+        var now = _time.GetUtcNow();
+        using var connection = _db.OpenConnection();
+        using var transaction = Transaction.Begin(connection, immediate: true);
+        var last = ParseTime(Scalar<string?>(connection, "SELECT last_load FROM client_seen WHERE client = $client", ("$client", client)));
+        if (last is { } at && now - at < TimeSpan.FromMinutes(1))
+        {
+            return false;
+        }
+
+        Execute(
+            connection,
+            """
+            INSERT INTO client_seen (client, version, first_seen, last_load) VALUES ($client, $version, $now, $now)
+            ON CONFLICT (client) DO UPDATE SET version = excluded.version, last_load = excluded.last_load
+            """,
+            ("$client", client),
+            ("$version", version),
+            ("$now", Time(now)));
+        transaction.Commit();
+        return true;
+    }
+
+    /// <summary>
+    /// Records that a playback started in a client.
+    /// </summary>
+    /// <param name="client">The client name.</param>
+    /// <param name="version">The client version.</param>
+    public void RecordPlayStart(string client, string? version)
+    {
+        using var connection = _db.OpenConnection();
+        Execute(
+            connection,
+            """
+            INSERT INTO client_seen (client, version, first_seen, last_play) VALUES ($client, $version, $now, $now)
+            ON CONFLICT (client) DO UPDATE SET version = COALESCE(excluded.version, client_seen.version), last_play = excluded.last_play
+            """,
+            ("$client", client),
+            ("$version", version),
+            ("$now", Now()));
+    }
+
+    /// <summary>
+    /// Gets every client the plugin has seen load the Report button or start a web playback.
+    /// </summary>
+    /// <returns>One row per client.</returns>
+    public IReadOnlyList<ClientSeen> GetClientsSeen()
+    {
+        using var connection = _db.OpenConnection();
+        return Rows(
+            connection,
+            "SELECT client, version, first_seen, last_load, last_play FROM client_seen ORDER BY client",
+            r => new ClientSeen(
+                r.GetString(0),
+                r.IsDBNull(1) ? null : r.GetString(1),
+                ParseTime(r.GetString(2))!.Value,
+                ParseTime(r.IsDBNull(3) ? null : r.GetString(3)),
+                ParseTime(r.IsDBNull(4) ? null : r.GetString(4))));
+    }
+
+    /// <summary>
+    /// Gets a value the plugin keeps across restarts.
+    /// </summary>
+    /// <param name="key">The name.</param>
+    /// <returns>The value, or null.</returns>
+    public string? GetState(string key)
+    {
+        using var connection = _db.OpenConnection();
+        return Scalar<string?>(connection, "SELECT value FROM plugin_state WHERE key = $key", ("$key", key));
+    }
+
+    /// <summary>
+    /// Sets or, with null, removes a value the plugin keeps across restarts.
+    /// </summary>
+    /// <param name="key">The name.</param>
+    /// <param name="value">The value.</param>
+    public void SetState(string key, string? value)
+    {
+        using var connection = _db.OpenConnection();
+        if (value is null)
+        {
+            Execute(connection, "DELETE FROM plugin_state WHERE key = $key", ("$key", key));
+            return;
+        }
+
+        Execute(
+            connection,
+            "INSERT INTO plugin_state (key, value) VALUES ($key, $value) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+            ("$key", key),
+            ("$value", value));
+    }
+
+    /// <summary>
     /// Records now as when an admin last opened the Reports tab.
     /// </summary>
     /// <param name="adminUserId">The admin.</param>

@@ -10,7 +10,8 @@ namespace Jellyfin.Plugin.MediaReports.Api;
 /// <param name="OpenIssues">How many issues are open.</param>
 /// <param name="Reports">How many reports the open issues hold.</param>
 /// <param name="New">How many open issues have a report newer than the caller last looked.</param>
-public sealed record AdminSummary(int OpenIssues, int Reports, int New);
+/// <param name="ButtonStopped">True when the Report button hasn't loaded in any app for 7 days while web apps played.</param>
+public sealed record AdminSummary(int OpenIssues, int Reports, int New, bool ButtonStopped = false);
 
 /// <summary>
 /// What the admin's issue list shows.

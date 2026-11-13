@@ -204,6 +204,24 @@ assert all(r["snapshot"]["schemaVersion"] == 1 for r in d["reports"])
 print("migrated: schema %d, 3 issues, 3 reports, snapshots readable" % d["schemaVersion"])
 PY
 
+echo "== the migrated database keeps where the Report button loaded, across a restart"
+call POST /MediaReports/Client/Loaded '{"Client":"Jellyfin Web","Version":"10.12.0"}' >/dev/null
+call POST /MediaReports/Client/Loaded '{"Client":"Jellyfin Web","Version":"10.12.0"}' >/dev/null
+stop_server
+rm -f "$work/after-restart.db"
+MSYS_NO_PATHCONV=1 docker cp "$container:$db_dir/media-reports.db" "$(host_path "$work/after-restart.db")"
+py - "$work/after-restart.db" <<'PY' || fail "client_seen does not hold the load signal"
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+assert {"client_seen", "plugin_state"} <= tables, tables
+rows = db.execute("SELECT client, version, first_seen, last_load, last_play FROM client_seen").fetchall()
+assert len(rows) == 1 and rows[0][0] == "Jellyfin Web" and rows[0][1] == "10.12.0" and rows[0][3], rows
+print("client_seen: one row for Jellyfin Web with its last load, kept on disk")
+PY
+start_server
+token="$(sign_in admin admin-password)"
+
 echo "== the export is admin-only"
 viewer_token="$(sign_in viewer viewer-password)"
 code="$(status_as "$viewer_token" GET /MediaReports/Admin/Export)"

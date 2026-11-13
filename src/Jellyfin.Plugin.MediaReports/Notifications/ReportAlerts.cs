@@ -55,6 +55,16 @@ public sealed class ReportAlerts
     /// </summary>
     public const string ActivityType = "MediaReportsReportFiled";
 
+    /// <summary>
+    /// The message when the Report button stops loading; the Dashboard shows the same warning.
+    /// </summary>
+    public const string ButtonStoppedText = "The Report button hasn't loaded in any app for 7 days. A Jellyfin update may have broken it.";
+
+    /// <summary>
+    /// The message when the Report button loads again.
+    /// </summary>
+    public const string ButtonLoadingText = "The Report button is loading again.";
+
     private const int DiscordAmber = 0xFFB23F;
 
     // The bodies are JSON for webhooks, not HTML, so names and notes go out as written.
@@ -250,6 +260,54 @@ public sealed class ReportAlerts
             ["sentAt"] = (sentAt ?? DateTimeOffset.UtcNow).ToString("o", CultureInfo.InvariantCulture),
             ["reports"] = list,
         }.ToJsonString(BodyOptions);
+    }
+
+    /// <summary>
+    /// Builds the Discord and generic bodies of the Report button's stopped or loading-again message.
+    /// </summary>
+    /// <param name="stopped">True for stopped, false for loading again.</param>
+    /// <param name="link">The address of Media Reports in the Dashboard.</param>
+    /// <param name="sentAt">When it is sent.</param>
+    /// <returns>The Discord body and the generic body.</returns>
+    public static (string Discord, string Generic) ButtonMessage(bool stopped, string link, DateTimeOffset sentAt)
+    {
+        var message = stopped ? ButtonStoppedText : ButtonLoadingText;
+        var discord = new JsonObject
+        {
+            ["username"] = "Media Reports",
+            ["content"] = message + " " + link,
+        }.ToJsonString(BodyOptions);
+        var generic = new JsonObject
+        {
+            ["event"] = stopped ? "button.stopped" : "button.loading",
+            ["sentAt"] = sentAt.ToString("o", CultureInfo.InvariantCulture),
+            ["message"] = message,
+            ["link"] = link,
+        }.ToJsonString(BodyOptions);
+        return (discord, generic);
+    }
+
+    /// <summary>
+    /// Sends the Report button's stopped or loading-again message to each webhook set, retrying once.
+    /// </summary>
+    /// <param name="stopped">True for stopped, false for loading again.</param>
+    /// <returns>A task that completes when both webhooks have answered or given up.</returns>
+    public Task SendButtonAsync(bool stopped)
+    {
+        var config = _config();
+        var (discord, generic) = ButtonMessage(stopped, PageLink(null), _time.GetUtcNow());
+        var sends = new List<Task>();
+        if (!string.IsNullOrWhiteSpace(config.DiscordWebhookUrl))
+        {
+            sends.Add(SendWithRetry("Discord", config.DiscordWebhookUrl.Trim(), discord));
+        }
+
+        if (!string.IsNullOrWhiteSpace(config.WebhookUrl))
+        {
+            sends.Add(SendWithRetry("generic", config.WebhookUrl.Trim(), generic));
+        }
+
+        return Task.WhenAll(sends);
     }
 
     private AlertReport Describe(StoredReport report)

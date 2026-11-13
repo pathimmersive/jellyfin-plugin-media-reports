@@ -528,17 +528,30 @@ def report_from_player(page, layout, sid):
     page.keyboard.press("Escape")
 
 
+def wait_for_loads(page, loads, count):
+    for _ in range(50):
+        if len(loads) >= count:
+            break
+        page.wait_for_timeout(200)
+
+
 def run(p, layout, user, context_args):
     b = browser(p)
     page = b.new_context(**context_args).new_page()
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)) if "reporter.js" in (e.stack or "") else None)
     page.on("console", lambda m: errors.append(m.text) if "[Media Reports]" in m.text else None)
+    loads = []
+    page.on("request", lambda r: loads.append(r.url) if r.method == "POST" and "/MediaReports/Client/Loaded" in r.url else None)
     sign_in(page, user)
+    page_loads = 1
     if layout == "tv":
+        wait_for_loads(page, loads, 1)
         page.evaluate("localStorage.setItem('layout', 'tv')")
         page.reload()
+        page_loads = 2
         page.wait_for_function("() => document.documentElement.classList.contains('layout-tv')", timeout=WAIT_MS)
+    wait_for_loads(page, loads, page_loads)
     sid = server_id()
     details = lambda item: "%s/web/#/details?id=%s&serverId=%s" % (API, item, sid)
 
@@ -555,6 +568,7 @@ def run(p, layout, user, context_args):
     report_from(page, "Series", "Other", layout, sid)
     report_from_player(page, layout, sid)
 
+    check(len(loads) == page_loads, "%s: the script posted its load signal once per page load (%d posts, %d page loads)" % (layout, len(loads), page_loads))
     check(not errors, layout + ": no errors from the Report button script" + (": " + "; ".join(errors) if errors else ""))
     b.close()
 
@@ -995,6 +1009,15 @@ with sync_playwright() as p:
     run(p, "desktop", "alice", {"viewport": {"width": 1440, "height": 900}})
     run(p, "phone", "bob", PHONE)
     run(p, "tv", "carol", {"viewport": {"width": 1280, "height": 720}})
+
+    # The metrics show where the Report button last loaded, and that it is not stopped.
+    metrics_auth = 'MediaBrowser Client="media-reports-smoke", Device="smoke", DeviceId="media-reports-web", Version="1.0.0", Token="%s"' % cfg["admin_token"]
+    with urllib.request.urlopen(urllib.request.Request(API + "/MediaReports/Metrics", headers={"Authorization": metrics_auth})) as response:
+        metrics = response.read().decode()
+    last_load = [l for l in metrics.splitlines() if l.startswith('media_reports_button_last_load_timestamp_seconds{client="Jellyfin Web"} ')]
+    check(len(last_load) == 1 and abs(int(last_load[0].split()[-1]) - time.time()) < 3600,
+          "metrics: Jellyfin Web's last load of the Report button is recent (%s)" % [l for l in metrics.splitlines() if "button" in l and not l.startswith("#")])
+    check("media_reports_button_stopped 0" in metrics.splitlines(), "metrics: the Report button does not count as stopped")
 
     # What the dialogs stored.
     export = admin("/MediaReports/Admin/Export")

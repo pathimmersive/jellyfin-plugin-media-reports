@@ -16,7 +16,7 @@ public sealed class ReportDatabase
     /// <summary>
     /// The schema version this build writes.
     /// </summary>
-    public const int SchemaVersion = 3;
+    public const int SchemaVersion = 4;
 
     /// <summary>
     /// The schema changes in order; entry <c>n</c> moves a database from version <c>n</c> to <c>n + 1</c>.
@@ -96,6 +96,22 @@ public sealed class ReportDatabase
         // 3: when a reporter removed a closed report from their list.
         """
         ALTER TABLE report ADD COLUMN reporter_hidden_at TEXT;
+        """,
+
+        // 4: where the Report button last loaded and web playback last started, for the
+        // stopped-loading warning, and the few values the plugin keeps across restarts.
+        """
+        CREATE TABLE client_seen (
+            client TEXT PRIMARY KEY,
+            version TEXT,
+            first_seen TEXT NOT NULL,
+            last_load TEXT,
+            last_play TEXT
+        );
+        CREATE TABLE plugin_state (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        );
         """,
     ];
 

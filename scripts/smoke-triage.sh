@@ -227,6 +227,32 @@ series = ok("GET", "/Items?IncludeItemTypes=Series&Recursive=true", ADMIN)["Item
 SERVER_ID = ok("GET", "/System/Info/Public")["Id"]
 
 
+# Stops the server, runs a change on its stopped container, and starts it again. A restarted
+# container gets a new host port.
+def restart_server(change):
+    global API
+    container = cfg["container"]
+    subprocess.run(["docker", "stop", "-t", "30", container], check=True, capture_output=True)
+    change()
+    subprocess.run(["docker", "start", container], check=True, capture_output=True)
+    port = subprocess.run(["docker", "port", container, "8096/tcp"], check=True, capture_output=True, text=True).stdout.split()[0].rsplit(":", 1)[1]
+    API = "http://127.0.0.1:" + port
+    deadline = time.time() + 180
+    while True:
+        try:
+            if request("GET", "/System/Info/Public")[0] == 200:
+                break
+        except Exception:  # noqa: BLE001
+            pass
+        if time.time() > deadline:
+            raise SystemExit("FAIL: the server did not come back")
+        time.sleep(3)
+    time.sleep(5)
+
+
+DB = cfg["container"] + ":/config/data/media-reports/media-reports.db"
+
+
 def browser(p):
     launch = {"channel": os.environ["PLAYWRIGHT_CHANNEL"]} if os.environ.get("PLAYWRIGHT_CHANNEL") else {}
     return p.chromium.launch(**launch)
@@ -607,28 +633,61 @@ with sync_playwright() as p:
 
     check(not errors, "no script errors on the page" + (": " + "; ".join(errors) if errors else ""))
 
+    # ---- The Report button stopped loading ---------------------------------------------
+    # The database is edited while the server is stopped: the button last loaded 8 days ago,
+    # watching began 30 days ago, and Jellyfin Web started a playback yesterday.
+    def edit_db(sql):
+        local = os.path.join(tempfile.mkdtemp(), "media-reports.db")
+        subprocess.run(["docker", "cp", DB, local], check=True, capture_output=True)
+        wal = subprocess.run(["docker", "cp", DB + "-wal", local + "-wal"], capture_output=True).returncode == 0
+        db = sqlite3.connect(local)
+        try:
+            db.executescript(sql)
+            db.commit()
+            db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            db.execute("PRAGMA journal_mode = DELETE")
+        finally:
+            db.close()
+        subprocess.run(["docker", "cp", local, DB], check=True, capture_output=True)
+        if wal:
+            empty = os.path.join(tempfile.mkdtemp(), "empty")
+            open(empty, "wb").close()
+            for suffix in ("-wal", "-shm"):
+                subprocess.run(["docker", "cp", empty, DB + suffix], capture_output=True)
+
+    def ago(days):
+        return time.strftime("%Y-%m-%dT%H:%M:%S.0000000Z", time.gmtime(time.time() - days * 86400))
+
+    restart_server(lambda: edit_db("""
+        DELETE FROM client_seen; DELETE FROM plugin_state;
+        INSERT INTO client_seen (client, version, first_seen, last_load, last_play)
+        VALUES ('Jellyfin Web', '10.11.0', '%s', '%s', '%s');""" % (ago(30), ago(8), ago(1))))
+    # The browser's own load signal is dropped, as if the script no longer loaded.
+    watch = b.new_context(viewport={"width": 1440, "height": 900}).new_page()
+    watch.route("**/MediaReports/Client/Loaded", lambda route: route.abort())
+    sign_in(watch, "admin")
+    open_page(watch)
+    watch.wait_for_selector(V + ".mrButtonStopped", timeout=WAIT_MS)
+    above = watch.evaluate("""() => { const w = document.querySelector('.page:not(.hide) .mrButtonStopped'), t = document.querySelector('.page:not(.hide) .mrTabs');
+        return !!(w && t && (w.compareDocumentPosition(t) & Node.DOCUMENT_POSITION_FOLLOWING)); }""")
+    check(above and "hasn't loaded in any app for 7 days" in text(watch, ".mrButtonStopped"),
+          "with no load for 8 days while Jellyfin Web played, the warning shows above the tabs")
+    status, _ = request("POST", "/MediaReports/Client/Loaded", sign_in_api("admin", "smoke-load"), {"Client": "Jellyfin Web", "Version": "10.12.0"})
+    check(status == 204, "a load signal is accepted (%s)" % status)
+    watch.reload()
+    loaded(watch)
+    try:
+        watch.wait_for_selector(V + ".mrButtonStopped", state="detached", timeout=WAIT_MS)
+    except Exception:  # noqa: BLE001
+        pass
+    check(watch.locator(V + ".mrHead").count() == 1 and watch.locator(V + ".mrButtonStopped").count() == 0, "after a load signal the warning is gone")
+    watch.close()
+
     # ---- Couldn't load: a database newer than this plugin ------------------------------
-    container = cfg["container"]
     newer_db = os.path.join(tempfile.mkdtemp(), "media-reports.db")
     with sqlite3.connect(newer_db) as db:
         db.execute("PRAGMA user_version = 99")
-    subprocess.run(["docker", "stop", "-t", "30", container], check=True, capture_output=True)
-    subprocess.run(["docker", "cp", newer_db, container + ":/config/data/media-reports/media-reports.db"], check=True, capture_output=True)
-    subprocess.run(["docker", "start", container], check=True, capture_output=True)
-    # A restarted container gets a new host port.
-    port = subprocess.run(["docker", "port", container, "8096/tcp"], check=True, capture_output=True, text=True).stdout.split()[0].rsplit(":", 1)[1]
-    API = "http://127.0.0.1:" + port
-    deadline = time.time() + 180
-    while True:
-        try:
-            if request("GET", "/System/Info/Public")[0] == 200:
-                break
-        except Exception:  # noqa: BLE001
-            pass
-        if time.time() > deadline:
-            raise SystemExit("FAIL: the server did not come back")
-        time.sleep(3)
-    time.sleep(5)
+    restart_server(lambda: subprocess.run(["docker", "cp", newer_db, DB], check=True, capture_output=True))
     sign_in(page, "admin")
     open_page(page)
     page.wait_for_selector(V + ".mrCouldNotLoad", timeout=WAIT_MS)

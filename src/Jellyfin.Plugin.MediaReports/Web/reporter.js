@@ -241,7 +241,7 @@
         + '.mediaReportsNote{box-sizing:border-box;width:100%;min-height:96px;background:rgba(255,255,255,.08);color:inherit;font:inherit;'
         + 'border:1px solid rgba(255,255,255,.3);border-radius:4px;padding:8px;resize:vertical;}'
         + '.mediaReportsCount{margin-top:4px;font-size:.85em;color:rgba(255,255,255,.6);text-align:right;}'
-        + '.mediaReportsPlayback,.mediaReportsHint{margin:16px 0 0;color:rgba(255,255,255,.7);font-size:.9em;}'
+        + '.mediaReportsHint{margin:16px 0 0;color:rgba(255,255,255,.7);font-size:.9em;}'
         + '.mediaReportsInfo,.mediaReportsError{margin:16px 0 0;padding:12px 16px;border-radius:4px;}'
         + '.mediaReportsInfo{background:rgba(0,164,220,.12);border-left:4px solid #00a4dc;}'
         + '.mediaReportsError{background:rgba(244,67,54,.15);border-left:4px solid #f44336;}'
@@ -621,9 +621,7 @@
         });
         body.appendChild(reasons);
 
-        if (state.tv) {
-            body.appendChild(el('p', 'mediaReportsHint', 'Typing a note with a remote is slow, so the TV asks for a reason only.'));
-        } else {
+        if (!state.tv) {
             var noteLabel = el('label', 'mediaReportsLabel', 'Anything else? (optional)');
             noteLabel.setAttribute('for', 'mediaReportsNote');
             noteLabel.style.display = 'block';
@@ -636,15 +634,6 @@
             });
             body.appendChild(state.note);
             body.appendChild(count);
-        }
-
-        var playback = context.Playback;
-        if (playback) {
-            var line = state.fromPlayer && playback.State === 'Playing'
-                ? "How it's playing right now is attached."
-                : 'How you last played it, on ' + (playback.DeviceName || 'another device') + ' ' + dayOf(playback.LastSeen)
-                    + ', is attached so the admin can see what went wrong.';
-            body.appendChild(el('p', 'mediaReportsPlayback', line));
         }
 
         var actions = el('div', 'mediaReportsActions');

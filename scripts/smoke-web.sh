@@ -259,7 +259,7 @@ DIALOG_STATE = """() => {
     note: d.querySelector('.mediaReportsNote') ? d.querySelector('.mediaReportsNote').value : null,
     noteShown: !!d.querySelector('.mediaReportsNote') && d.querySelector('.mediaReportsNote').offsetParent !== null,
     send: send ? send.textContent.trim() : null, sendDisabled: send ? send.disabled : null,
-    playback: text('.mediaReportsPlayback'), error: text('.mediaReportsError'), info: text('.mediaReportsInfo'),
+    playback: text('.mediaReportsPlayback'), hint: text('.mediaReportsHint'), error: text('.mediaReportsError'), info: text('.mediaReportsInfo'),
     sent: text('.mediaReportsSent'), focusInside: d.contains(document.activeElement),
     focus: document.activeElement ? (document.activeElement.textContent || '').trim() : ''
   };
@@ -398,6 +398,7 @@ def report_from_page(page, layout):
     check(s["sendDisabled"] is True and s["send"] == "Send report", where + ": Send is disabled until a reason is picked")
     check(s["focusInside"], where + ": focus moves into the dialog")
     check(s["playback"] is None, where + ": no playback is mentioned before this user played it")
+    check(s["hint"] is None, where + ": no hint line under the reasons (%s)" % s["hint"])
     check(s["noteShown"] == (layout != "tv"), where + (": no note field on TV" if layout == "tv" else ": a note field"))
 
     if layout != "tv":
@@ -497,7 +498,8 @@ def report_from_player(page, layout, sid):
         return
     s = dialog(page)
     check_layout(s, "panel", where)
-    check(s["playback"] and "playing right now" in s["playback"], where + ": it says the playback right now is attached")
+    check(s["playback"] is None, where + ": no line about the attached playback (%s)" % s["playback"])
+    check(s["hint"] is None, where + ": no hint line under the reasons (%s)" % s["hint"])
     pick(page, "Poor quality", layout)
     if layout != "tv":
         page.locator(DIALOG + " .mediaReportsNote").type("Looks soft.")
@@ -522,7 +524,7 @@ def report_from_player(page, layout, sid):
     placed(page, DETAIL_BUTTON, ITEMS["Movie"], layout + ", movie page after playing")
     open_dialog(page, DETAIL_BUTTON, layout, layout + ", dialog after playing")
     s = dialog(page) or {}
-    check((s.get("playback") or "").startswith("How you last played it, on "), layout + ", dialog after playing: it names the device and day of the last playback")
+    check(s and s.get("playback") is None, layout + ", dialog after playing: no line about the attached playback (%s)" % s.get("playback"))
     page.keyboard.press("Escape")
 
 

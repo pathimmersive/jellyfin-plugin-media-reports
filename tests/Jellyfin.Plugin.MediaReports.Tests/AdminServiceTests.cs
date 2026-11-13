@@ -373,6 +373,64 @@ public sealed class AdminServiceTests : IDisposable
         });
     }
 
+    [Fact]
+    public void Findings_CountEachKindForSevenDays_NewestFirst_AndFilterByKind()
+    {
+        var movie = Guid.NewGuid();
+        Finding("freezing", "s1", movie, "Living Room TV");
+        _clock.Advance(TimeSpan.FromMinutes(5));
+        Finding("low-quality", "s2", movie, "Living Room TV");
+        Finding("freezing", "old", Guid.NewGuid(), "Den TV");
+        _store.SaveFinding(new NewFinding { Kind = "slow-transcode", PlaybackKey = "gone", ItemId = Guid.NewGuid(), Title = "Old", Detail = "x" });
+        _clock.Advance(TimeSpan.FromDays(8));
+        Finding("freezing", "s3", movie, "Living Room TV");
+
+        var list = Value(_service.ListFindings(null));
+
+        Assert.Equal(["freezing", "slow-transcode", "low-quality", "playback-error"], list.Kinds.Select(k => k.Kind));
+        Assert.Equal([1, 0, 0, 0], list.Kinds.Select(k => k.Count));
+        Assert.Equal(["Freezing", "Transcoder too slow", "Low quality", "Playback error mid-play"], list.Kinds.Select(k => k.Label));
+        Assert.Equal(5, list.Rows.Count);
+        Assert.True(list.Rows.Select(r => r.LastSeen).SequenceEqual(list.Rows.Select(r => r.LastSeen).OrderByDescending(t => t)));
+        Assert.All(Value(_service.ListFindings("freezing")).Rows, r => Assert.Equal("freezing", r.Kind));
+        Assert.Equal(Outcome.BadRequest, _service.ListFindings("nonsense").Outcome);
+        Assert.Equal(1, _service.GetSummary(_admin.Id, false).Suspected);
+    }
+
+    [Fact]
+    public void Findings_OnOneTitleOnTwoDevices_NoteTheOtherDevice_AndAnEpisodeHasItsLine()
+    {
+        var episode = Guid.NewGuid();
+        _store.SaveFinding(new NewFinding { Kind = "freezing", PlaybackKey = "a", ItemId = episode, Title = "Pilot", SeriesName = "Show", SeasonNumber = 1, EpisodeNumber = 2, Device = "Living Room TV", Client = "Jellyfin Roku", UserName = "alice", Detail = "Position jumped back 8 s, 3 times in 2 minutes" });
+        _store.SaveFinding(new NewFinding { Kind = "low-quality", PlaybackKey = "b", ItemId = episode, Title = "Pilot", Device = "Bedroom TV", Detail = "x" });
+        _store.SaveFinding(new NewFinding { Kind = "freezing", PlaybackKey = "c", ItemId = Guid.NewGuid(), Title = "Other", Device = "Living Room TV", Detail = "x" });
+
+        var rows = Value(_service.ListFindings(null)).Rows;
+
+        var a = rows.Single(r => r.Device == "Living Room TV" && r.Title == "Pilot");
+        Assert.Equal(1, a.OtherDevices);
+        Assert.Equal("Show · S1 E2", a.Line);
+        Assert.Equal("Freezing", a.KindLabel);
+        Assert.Equal(1, rows.Single(r => r.Device == "Bedroom TV").OtherDevices);
+        Assert.Equal(0, rows.Single(r => r.Title == "Other").OtherDevices);
+    }
+
+    [Fact]
+    public void Dismiss_HidesTheFindingAtOnce_AndAnUnknownOneIsNotFound()
+    {
+        Finding("freezing", "s1", Guid.NewGuid(), "Living Room TV");
+        var id = Value(_service.ListFindings(null)).Rows.Single().Id;
+
+        Assert.Equal(Outcome.Ok, _service.DismissFinding(id).Outcome);
+
+        Assert.Empty(Value(_service.ListFindings(null)).Rows);
+        Assert.Equal(0, Value(_service.ListFindings(null)).Kinds.Sum(k => k.Count));
+        Assert.Equal(Outcome.NotFound, _service.DismissFinding(id + 100).Outcome);
+    }
+
+    private void Finding(string kind, string playback, Guid item, string device) =>
+        _store.SaveFinding(new NewFinding { Kind = kind, PlaybackKey = playback, ItemId = item, Title = "Test Movie", Device = device, Client = "Jellyfin Roku", UserName = "alice", Detail = "what the server saw" });
+
     private IssueList List(IssueQuery query) => Value(_service.ListIssues(_admin.Id, query));
 
     private static T Value<T>(ServiceResult<T> result)

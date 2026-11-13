@@ -673,6 +673,68 @@ public sealed class ReportStore
     }
 
     /// <summary>
+    /// Gets the kept findings not dismissed, newest first.
+    /// </summary>
+    /// <param name="kind">Only this kind, or null for all.</param>
+    /// <param name="limit">The most to return.</param>
+    /// <returns>The findings.</returns>
+    public IReadOnlyList<StoredFinding> GetFindings(string? kind, int limit)
+    {
+        using var connection = _db.OpenConnection();
+        return Rows(
+            connection,
+            "SELECT * FROM finding WHERE dismissed_at IS NULL AND ($kind IS NULL OR kind = $kind) ORDER BY last_seen DESC, id DESC LIMIT $limit",
+            r => new StoredFinding
+            {
+                Id = r.GetInt64(r.GetOrdinal("id")),
+                Kind = r.GetString(r.GetOrdinal("kind")),
+                ItemId = Guid.Parse(r.GetString(r.GetOrdinal("item_id"))),
+                ItemType = Text(r, "item_type"),
+                Title = r.GetString(r.GetOrdinal("title")),
+                SeriesName = Text(r, "series_name"),
+                SeasonNumber = (int?)Number(r, "season_number"),
+                EpisodeNumber = (int?)Number(r, "episode_number"),
+                UserName = Text(r, "user_name"),
+                Device = Text(r, "device"),
+                Client = Text(r, "client"),
+                FirstSeen = ParseTime(Text(r, "first_seen"))!.Value,
+                LastSeen = ParseTime(Text(r, "last_seen"))!.Value,
+                Detail = r.GetString(r.GetOrdinal("detail")),
+            },
+            ("$kind", kind),
+            ("$limit", limit));
+    }
+
+    /// <summary>
+    /// Gets, per item, the devices that had findings last seen in the past days and not dismissed.
+    /// </summary>
+    /// <param name="days">The days to look back.</param>
+    /// <returns>The devices, by item.</returns>
+    public IReadOnlyDictionary<Guid, IReadOnlySet<string>> GetRecentFindingDevices(int days)
+    {
+        using var connection = _db.OpenConnection();
+        return Rows(
+            connection,
+            "SELECT DISTINCT item_id, COALESCE(device, '') FROM finding WHERE last_seen >= $since AND dismissed_at IS NULL",
+            r => (Item: Guid.Parse(r.GetString(0)), Device: r.GetString(1)),
+            ("$since", Time(_time.GetUtcNow() - TimeSpan.FromDays(days))))
+            .GroupBy(r => r.Item)
+            .ToDictionary(g => g.Key, g => (IReadOnlySet<string>)g.Select(r => r.Device).ToHashSet(StringComparer.Ordinal));
+    }
+
+    /// <summary>
+    /// Hides a finding from the Suspected problems tab.
+    /// </summary>
+    /// <param name="findingId">The finding.</param>
+    /// <returns>False when there is no such finding.</returns>
+    public bool DismissFinding(long findingId)
+    {
+        using var connection = _db.OpenConnection();
+        using var command = Command(connection, "UPDATE finding SET dismissed_at = COALESCE(dismissed_at, $now) WHERE id = $id", [("$now", Now()), ("$id", findingId)]);
+        return command.ExecuteNonQuery() > 0;
+    }
+
+    /// <summary>
     /// Deletes findings last seen more than <see cref="FindingDays"/> days ago, dismissed or not.
     /// </summary>
     /// <returns>How many were deleted.</returns>

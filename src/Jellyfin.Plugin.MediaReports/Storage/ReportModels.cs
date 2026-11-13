@@ -409,3 +409,51 @@ public sealed record NewFinding
     /// <summary>Gets what the server saw, in words.</summary>
     public string Detail { get; init; } = string.Empty;
 }
+
+/// <summary>
+/// A kept suspected problem, as the Suspected problems tab shows it.
+/// </summary>
+public sealed record StoredFinding
+{
+    /// <summary>Gets the id.</summary>
+    public long Id { get; init; }
+
+    /// <summary>Gets the kind.</summary>
+    public string Kind { get; init; } = string.Empty;
+
+    /// <summary>Gets the item.</summary>
+    public Guid ItemId { get; init; }
+
+    /// <summary>Gets the item type.</summary>
+    public string? ItemType { get; init; }
+
+    /// <summary>Gets the title.</summary>
+    public string Title { get; init; } = string.Empty;
+
+    /// <summary>Gets the series name, for an episode.</summary>
+    public string? SeriesName { get; init; }
+
+    /// <summary>Gets the season number.</summary>
+    public int? SeasonNumber { get; init; }
+
+    /// <summary>Gets the episode number.</summary>
+    public int? EpisodeNumber { get; init; }
+
+    /// <summary>Gets the user's name.</summary>
+    public string? UserName { get; init; }
+
+    /// <summary>Gets the device name.</summary>
+    public string? Device { get; init; }
+
+    /// <summary>Gets the client name.</summary>
+    public string? Client { get; init; }
+
+    /// <summary>Gets when it was first seen.</summary>
+    public DateTimeOffset FirstSeen { get; init; }
+
+    /// <summary>Gets when it was last seen.</summary>
+    public DateTimeOffset LastSeen { get; init; }
+
+    /// <summary>Gets what the server saw, in words.</summary>
+    public string Detail { get; init; } = string.Empty;
+}

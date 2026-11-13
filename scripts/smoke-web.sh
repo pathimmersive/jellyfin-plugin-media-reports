@@ -54,7 +54,7 @@ plugin_version="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$meta")"
 container="media-reports-web-$$"
 
 if [[ $keep -eq 0 ]]; then
-  trap 'docker rm -f "$container" >/dev/null 2>&1 || true' EXIT
+  trap 'status=$?; if (( status != 0 )); then echo "== server log (last 80 lines)" >&2; docker logs --tail 80 "$container" >&2 2>&1 || true; fi; docker rm -f "$container" >/dev/null 2>&1 || true' EXIT
 fi
 
 echo "== dotnet publish"

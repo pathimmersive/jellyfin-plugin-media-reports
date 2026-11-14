@@ -7,6 +7,8 @@ using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Session;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Jellyfin.Plugin.MediaReports.Playback;
 
@@ -26,16 +28,19 @@ public sealed class PlaybackCapture : IHostedService
     private readonly ILibraryManager _libraryManager;
     private readonly TimeProvider _time;
     private readonly Func<TimeSpan> _retention;
+    private readonly ILogger _logger;
     private readonly Dictionary<string, PlaybackEntry> _entries = new(StringComparer.Ordinal);
     private readonly object _lock = new();
+    private DateTimeOffset _lastWarning = DateTimeOffset.MinValue;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PlaybackCapture"/> class.
     /// </summary>
     /// <param name="sessionManager">The session manager.</param>
     /// <param name="libraryManager">The library manager.</param>
-    public PlaybackCapture(ISessionManager sessionManager, ILibraryManager libraryManager)
-        : this(sessionManager, libraryManager, TimeProvider.System, ConfiguredRetention)
+    /// <param name="logger">The logger.</param>
+    public PlaybackCapture(ISessionManager sessionManager, ILibraryManager libraryManager, ILogger<PlaybackCapture>? logger = null)
+        : this(sessionManager, libraryManager, TimeProvider.System, ConfiguredRetention, logger)
     {
     }
 
@@ -46,12 +51,14 @@ public sealed class PlaybackCapture : IHostedService
     /// <param name="libraryManager">The library manager.</param>
     /// <param name="time">The clock.</param>
     /// <param name="retention">Returns the current retention window; read on every use.</param>
-    public PlaybackCapture(ISessionManager sessionManager, ILibraryManager libraryManager, TimeProvider time, Func<TimeSpan> retention)
+    /// <param name="logger">The logger.</param>
+    public PlaybackCapture(ISessionManager sessionManager, ILibraryManager libraryManager, TimeProvider time, Func<TimeSpan> retention, ILogger? logger = null)
     {
         _sessionManager = sessionManager;
         _libraryManager = libraryManager;
         _time = time;
         _retention = retention;
+        _logger = logger ?? NullLogger.Instance;
     }
 
     /// <inheritdoc />
@@ -85,16 +92,17 @@ public sealed class PlaybackCapture : IHostedService
             .Where(s => s.UserId.Equals(userId) && s.NowPlayingItem is not null)
             .ToList();
 
+        Dictionary<string, PlaybackEntry?> previous;
+        lock (_lock)
+        {
+            previous = live.ToDictionary(s => s.Id, s => _entries.GetValueOrDefault(s.Id), StringComparer.Ordinal);
+        }
+
+        // Observing can look up the library, so it runs outside the lock.
+        var result = live.Select(s => Observe(s, previous[s.Id])).ToList();
         lock (_lock)
         {
             Prune();
-            var result = new List<PlaybackEntry>();
-            foreach (var session in live)
-            {
-                _entries.TryGetValue(session.Id, out var previous);
-                result.Add(Observe(session, previous));
-            }
-
             var liveIds = live.Select(s => s.Id).ToHashSet(StringComparer.Ordinal);
             result.AddRange(_entries.Values.Where(e => e.UserId.Equals(userId) && !liveIds.Contains(e.SessionId)));
             return result.OrderByDescending(e => e.LastSeen).Take(MaxPerUser).ToList();
@@ -104,18 +112,41 @@ public sealed class PlaybackCapture : IHostedService
     private static TimeSpan ConfiguredRetention()
         => TimeSpan.FromHours(Math.Max(0, Plugin.Instance?.Configuration.PlaybackRetentionHours ?? 24));
 
+    // Jellyfin raises this on its own thread for every playback, so it never throws and does
+    // its library lookups outside the lock.
     private void OnPlaybackProgress(object? sender, PlaybackProgressEventArgs e)
+    {
+        try
+        {
+            Capture(e);
+        }
+        catch (Exception ex)
+        {
+            var now = _time.GetUtcNow();
+            if (now - _lastWarning >= TimeSpan.FromMinutes(1))
+            {
+                _lastWarning = now;
+                _logger.LogWarning(ex, "Media Reports couldn't record a playback update; it will try again with the next one");
+            }
+        }
+    }
+
+    private void Capture(PlaybackProgressEventArgs e)
     {
         if (e.Session is not { } session || session.NowPlayingItem is null)
         {
             return;
         }
 
-        PlaybackEntry entry;
+        PlaybackEntry? previous;
         lock (_lock)
         {
-            _entries.TryGetValue(session.Id, out var previous);
-            entry = Observe(session, previous);
+            previous = _entries.GetValueOrDefault(session.Id);
+        }
+
+        var entry = Observe(session, previous);
+        lock (_lock)
+        {
             _entries[session.Id] = entry;
             Prune();
         }

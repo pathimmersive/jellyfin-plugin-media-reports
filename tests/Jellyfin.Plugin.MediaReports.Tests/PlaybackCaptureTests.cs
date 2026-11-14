@@ -235,6 +235,25 @@ public class PlaybackCaptureTests
     }
 
     [Fact]
+    public async Task AThrowingLibrary_NeverReachesJellyfin_AndIsWarnedAtMostOnceAMinute()
+    {
+        var library = new Mock<ILibraryManager>();
+        library.Setup(m => m.GetItemById(It.IsAny<Guid>())).Throws(new InvalidOperationException("library gone"));
+        var logger = new ListLogger<PlaybackCapture>();
+        var capture = new PlaybackCapture(_sessions.Object, library.Object, _clock, () => _retention, logger);
+        await capture.StartAsync(default);
+
+        Progress(Session("tv", Alice, "Living Room TV", PlayMethod.DirectPlay));
+        Progress(Session("tv", Alice, "Living Room TV", PlayMethod.DirectPlay));
+        Assert.Single(logger.Warnings);
+
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        Progress(Session("tv", Alice, "Living Room TV", PlayMethod.DirectPlay));
+        Assert.Equal(2, logger.Warnings.Count);
+        await capture.StopAsync(default);
+    }
+
+    [Fact]
     public void NewInstall_RetentionWindowIs24Hours()
     {
         Assert.Equal(24, new Configuration.PluginConfiguration().PlaybackRetentionHours);

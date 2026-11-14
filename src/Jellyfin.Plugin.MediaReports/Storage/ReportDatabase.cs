@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using MediaBrowser.Common.Configuration;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
@@ -142,6 +143,7 @@ public sealed class ReportDatabase
     ];
 
     private readonly ILogger<ReportDatabase> _logger;
+    private long _connectionsOpened;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ReportDatabase"/> class at the server's data path.
@@ -178,6 +180,11 @@ public sealed class ReportDatabase
     /// Gets a value indicating whether the database opened at the current schema version.
     /// </summary>
     public bool IsAvailable { get; private set; }
+
+    /// <summary>
+    /// Gets how many connections have been opened for queries since the plugin started.
+    /// </summary>
+    public long ConnectionsOpened => Interlocked.Read(ref _connectionsOpened);
 
     /// <summary>
     /// Creates the file if needed and brings it to the current schema version. A database
@@ -241,6 +248,7 @@ public sealed class ReportDatabase
             throw new StorageUnavailableException();
         }
 
+        Interlocked.Increment(ref _connectionsOpened);
         var connection = new SqliteConnection(ConnectionString(SqliteOpenMode.ReadWrite));
         connection.Open();
         Execute(connection, "PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 30000;");

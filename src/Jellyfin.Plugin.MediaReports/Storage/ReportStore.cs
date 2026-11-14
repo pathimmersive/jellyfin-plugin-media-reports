@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Threading;
 using Jellyfin.Plugin.MediaReports.Relink;
 using Microsoft.Data.Sqlite;
 
@@ -29,6 +30,8 @@ public sealed class ReportStore
     private readonly TimeProvider _time;
     private readonly Func<int> _retentionDays;
 
+    private long _reportsVersion;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="ReportStore"/> class.
     /// </summary>
@@ -46,6 +49,12 @@ public sealed class ReportStore
     /// Gets the database.
     /// </summary>
     public ReportDatabase Database => _db;
+
+    /// <summary>
+    /// Gets a number that changes whenever a report or issue is added, moved, changes status
+    /// or is deleted, so a reader can keep what it read until it changes.
+    /// </summary>
+    public long ReportsVersion => Interlocked.Read(ref _reportsVersion);
 
     /// <summary>
     /// Stores a report in the open issue for its item and reason, or in a new issue.
@@ -115,6 +124,7 @@ public sealed class ReportStore
 
         AddEvent(connection, now, issueId, reportId, report.ReporterUserId, "filed", null);
         transaction.Commit();
+        Interlocked.Increment(ref _reportsVersion);
         return new FiledReport(reportId, issueId.Value);
     }
 
@@ -132,6 +142,7 @@ public sealed class ReportStore
         using var transaction = Transaction.Begin(connection, immediate: true);
         var result = SetStatus(connection, issueId, status, actorUserId, Now(), null);
         transaction.Commit();
+        Interlocked.Increment(ref _reportsVersion);
         return result;
     }
 
@@ -172,6 +183,7 @@ public sealed class ReportStore
         }
 
         transaction.Commit();
+        Interlocked.Increment(ref _reportsVersion);
         return result;
     }
 
@@ -206,6 +218,7 @@ public sealed class ReportStore
         if (refused.Count == 0)
         {
             transaction.Commit();
+            Interlocked.Increment(ref _reportsVersion);
             foreach (var id in closing)
             {
                 closed?.Add(id);
@@ -276,6 +289,7 @@ public sealed class ReportStore
         }
 
         transaction.Commit();
+        Interlocked.Increment(ref _reportsVersion);
         return ids.Count;
     }
 
@@ -353,6 +367,7 @@ public sealed class ReportStore
         }
 
         transaction.Commit();
+        Interlocked.Increment(ref _reportsVersion);
         return Withdrawal.Withdrawn;
     }
 
@@ -400,6 +415,7 @@ public sealed class ReportStore
         }
 
         transaction.Commit();
+        Interlocked.Increment(ref _reportsVersion);
         return issues.Count;
     }
 
@@ -504,6 +520,7 @@ public sealed class ReportStore
         }
 
         transaction.Commit();
+        Interlocked.Increment(ref _reportsVersion);
         return replaced;
     }
 
@@ -1278,7 +1295,7 @@ public sealed class ReportStore
     /// transactions take the write lock at once, so two reports filed together can't both
     /// start an issue. Disposing without a commit rolls back.
     /// </summary>
-    private sealed class Transaction : IDisposable
+    internal sealed class Transaction : IDisposable
     {
         private readonly SqliteConnection _connection;
         private bool _done;
@@ -1302,10 +1319,20 @@ public sealed class ReportStore
 
         public void Dispose()
         {
-            if (!_done)
+            if (_done)
             {
-                _done = true;
+                return;
+            }
+
+            _done = true;
+            try
+            {
                 Execute(_connection, "ROLLBACK");
+            }
+            catch (SqliteException)
+            {
+                // SQLite already rolled back after the error that brought us here; that error is
+                // the one the caller needs to see.
             }
         }
     }

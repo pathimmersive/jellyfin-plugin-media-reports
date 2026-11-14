@@ -120,6 +120,11 @@ public sealed class SuspectWatcher
     /// <summary>The share of the source frame rate under which a transcode is slow.</summary>
     public const double SlowShare = 0.9;
 
+    /// <summary>The most samples waiting at once; beyond it the oldest are dropped.</summary>
+    public const int MaxQueued = 1000;
+
+    private static readonly TimeSpan WriteInterval = TimeSpan.FromMinutes(1);
+
     private static readonly string[] BitrateLimits = ["ContainerBitrateExceedsLimit", "VideoBitrateNotSupported"];
 
     private readonly ReportStore _store;
@@ -128,8 +133,7 @@ public sealed class SuspectWatcher
     private readonly Action<string, string?> _added;
     private readonly ILogger<SuspectWatcher> _logger;
     private readonly Dictionary<string, Watch> _watches = new(StringComparer.Ordinal);
-    private readonly object _lock = new();
-    private Task _tail = Task.CompletedTask;
+    private readonly WorkQueue _queue;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SuspectWatcher"/> class.
@@ -146,48 +150,25 @@ public sealed class SuspectWatcher
         _title = title;
         _added = added;
         _logger = logger;
+        _queue = new WorkQueue(MaxQueued, "playback samples", logger);
     }
 
     /// <summary>
     /// Gets a task that completes when the samples queued so far have been looked at.
     /// </summary>
-    public Task WhenIdle
-    {
-        get
-        {
-            lock (_lock)
-            {
-                return _tail;
-            }
-        }
-    }
+    public Task WhenIdle => _queue.WhenIdle;
+
+    /// <summary>
+    /// Gets how many samples were dropped because too many were waiting.
+    /// </summary>
+    public int Dropped => _queue.Dropped;
 
     /// <summary>
     /// Queues a sample to be looked at off the caller's thread. A failure is logged and never
     /// reaches the caller.
     /// </summary>
     /// <param name="sample">The sample.</param>
-    public void Queue(SuspectSample sample)
-    {
-        lock (_lock)
-        {
-            _tail = _tail.ContinueWith(
-                _ =>
-                {
-                    try
-                    {
-                        Observe(sample);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Couldn't check a playback sample for suspected problems");
-                    }
-                },
-                CancellationToken.None,
-                TaskContinuationOptions.None,
-                TaskScheduler.Default);
-        }
-    }
+    public void Queue(SuspectSample sample) => _queue.Enqueue(() => Observe(sample));
 
     /// <summary>
     /// Looks at one sample now and adds or updates findings.
@@ -213,22 +194,22 @@ public sealed class SuspectWatcher
         {
             if (config.SuspectFreezing && CheckFreezing(watch, sample) is { } freezing)
             {
-                Record(Freezing, key, sample, freezing);
+                Record(watch, Freezing, key, sample, freezing);
             }
 
             if (config.SuspectSlowTranscode && CheckSlowTranscode(watch, sample) is { } slow)
             {
-                Record(SlowTranscode, key, sample, slow);
+                Record(watch, SlowTranscode, key, sample, slow);
             }
 
             if (config.SuspectLowQuality && CheckLowQuality(sample) is { } low)
             {
-                Record(LowQuality, key, sample, low);
+                Record(watch, LowQuality, key, sample, low);
             }
 
             if (config.SuspectPlaybackError && CheckPlaybackError(watch, sample) is { } error)
             {
-                Record(PlaybackError, key, sample, error);
+                Record(watch, PlaybackError, key, sample, error);
             }
 
             watch.LastPosition = sample.PositionTicks;
@@ -332,8 +313,17 @@ public sealed class SuspectWatcher
     private static string Describe(int? bitrate, int? height) =>
         string.Join(' ', new[] { bitrate is { } b ? Mbps(b) : null, height is { } h ? h.ToString(CultureInfo.InvariantCulture) + "p" : null }.Where(p => p is not null));
 
-    private void Record(string kind, string playbackKey, SuspectSample sample, string detail)
+    private void Record(Watch watch, string kind, string playbackKey, SuspectSample sample, string detail)
     {
+        // Slow transcodes and low quality hold on every progress report, so a finding already
+        // kept is brought up to date at most once a minute per playback. Freezing and playback
+        // errors are written on the jump or switch that shows them.
+        if (kind is SlowTranscode or LowQuality && watch.Written.TryGetValue(kind, out var written) && sample.At - written < WriteInterval)
+        {
+            return;
+        }
+
+        watch.Written[kind] = sample.At;
         var title = _title(sample.ItemId) ?? new FindingTitle(null, "Unknown title", null, null, null, null);
         var added = _store.SaveFinding(new NewFinding
         {
@@ -387,5 +377,7 @@ public sealed class SuspectWatcher
         public DateTimeOffset? SlowSince { get; set; }
 
         public List<float> SlowFps { get; } = [];
+
+        public Dictionary<string, DateTimeOffset> Written { get; } = new(StringComparer.Ordinal);
     }
 }

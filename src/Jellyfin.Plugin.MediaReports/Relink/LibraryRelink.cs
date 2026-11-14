@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.MediaReports.Storage;
@@ -19,8 +21,9 @@ public sealed class LibraryRelink : IHostedService
     private readonly IRelinkLibrary _library;
     private readonly ReportStore _store;
     private readonly ILogger<LibraryRelink> _logger;
+    private readonly WorkQueue _queue;
     private readonly object _lock = new();
-    private Task _tail = Task.CompletedTask;
+    private Reported? _reported;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LibraryRelink"/> class.
@@ -35,21 +38,23 @@ public sealed class LibraryRelink : IHostedService
         _library = library;
         _store = store;
         _logger = logger;
+        _queue = new WorkQueue(MaxQueued, "library changes (the daily re-link will look again)", logger);
     }
+
+    /// <summary>
+    /// The most library changes waiting at once; beyond it the oldest are dropped.
+    /// </summary>
+    public const int MaxQueued = 1000;
+
+    /// <summary>
+    /// Gets how many library changes were dropped because too many were waiting.
+    /// </summary>
+    public int Dropped => _queue.Dropped;
 
     /// <summary>
     /// Gets a task that completes when the work queued so far has run.
     /// </summary>
-    public Task WhenIdle
-    {
-        get
-        {
-            lock (_lock)
-            {
-                return _tail;
-            }
-        }
-    }
+    public Task WhenIdle => _queue.WhenIdle;
 
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
@@ -77,6 +82,11 @@ public sealed class LibraryRelink : IHostedService
     /// <returns>How many issues moved.</returns>
     public int Removed(Guid itemId, bool knownRemoved = true)
     {
+        if (!Current().Titles.Any(t => t.Id.Equals(itemId)))
+        {
+            return 0;
+        }
+
         var title = _store.GetReportedTitle(itemId);
         if (title is null || !RelinkMatcher.HasIds(title) || (!knownRemoved && _library.Contains(itemId)))
         {
@@ -107,7 +117,7 @@ public sealed class LibraryRelink : IHostedService
         }
 
         var moved = 0;
-        foreach (var title in _store.GetReportedTitles())
+        foreach (var title in Current().Titles)
         {
             if (title.Id != added.Id && RelinkMatcher.CouldMatch(title, added) && !_library.Contains(title.Id))
             {
@@ -125,7 +135,7 @@ public sealed class LibraryRelink : IHostedService
     /// <returns>How many issues became Replaced – verify.</returns>
     public int FileSeen(Guid itemId)
     {
-        if (!_store.HasOpenIssues(itemId) || _library.FileOf(itemId) is not { } file)
+        if (!Current().OpenItems.Contains(itemId) || !_store.HasOpenIssues(itemId) || _library.FileOf(itemId) is not { } file)
         {
             return 0;
         }
@@ -198,27 +208,29 @@ public sealed class LibraryRelink : IHostedService
         }
     }
 
-    // Runs the work after what is already queued, off the library's thread; a failure is logged
-    // and never reaches Jellyfin.
-    private void Queue(Action work)
+    private void Queue(Action work) => _queue.Enqueue(work);
+
+    // The reported titles and the items with open issues, read again only when reports or
+    // issues changed, so a library change to an unrelated item needs no database query.
+    private Reported Current()
     {
+        var version = _store.ReportsVersion;
         lock (_lock)
         {
-            _tail = _tail.ContinueWith(
-                _ =>
-                {
-                    try
-                    {
-                        work();
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Media reports could not follow a library change; the daily re-link will look again");
-                    }
-                },
-                CancellationToken.None,
-                TaskContinuationOptions.None,
-                TaskScheduler.Default);
+            if (_reported is { } kept && kept.Version == version)
+            {
+                return kept;
+            }
         }
+
+        var fresh = new Reported(version, _store.GetReportedTitles(), _store.GetIssueItemIds(openOnly: true).ToHashSet());
+        lock (_lock)
+        {
+            _reported = fresh;
+        }
+
+        return fresh;
     }
+
+    private sealed record Reported(long Version, IReadOnlyList<RelinkTitle> Titles, IReadOnlySet<Guid> OpenItems);
 }

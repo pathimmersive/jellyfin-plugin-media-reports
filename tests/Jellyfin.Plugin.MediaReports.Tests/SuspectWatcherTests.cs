@@ -268,7 +268,21 @@ public sealed class SuspectWatcherTests : IDisposable
         }
 
         await watcher.WhenIdle;
-        Assert.Single(logger.Warnings);
+        Assert.Single(logger.Errors);
+    }
+
+    [Fact]
+    public void AKeptFinding_IsWrittenAtMostOnceAMinute()
+    {
+        var before = _db.ConnectionsOpened;
+        for (var s = 0; s < 300; s++)
+        {
+            Sample(s, s, "Transcode", fps: 321, completion: 30, sourceFps: 24, bitrate: 1_060_000, height: 720, sourceBitrate: 20_000_000, sourceHeight: 1080, reasons: ["ContainerBitrateExceedsLimit"]);
+        }
+
+        // Written at 0, 60, 120, 180 and 240 s, against 300 samples.
+        Assert.Equal(5, _db.ConnectionsOpened - before);
+        Assert.Single(_store.GetFindings(null, 10));
     }
 
     [Fact]

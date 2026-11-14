@@ -269,6 +269,27 @@ public sealed class StorageTests : IDisposable
     }
 
     [Fact]
+    public void AWriteSQLiteAlreadyRolledBack_RaisesTheOriginalError()
+    {
+        var db = Open();
+        using var connection = db.OpenConnection();
+        var error = Assert.Throws<InvalidOperationException>(FailAfterSQLiteRolledBack);
+        Assert.Equal("the original error", error.Message);
+
+        void FailAfterSQLiteRolledBack()
+        {
+            using var transaction = ReportStore.Transaction.Begin(connection, immediate: true);
+            using (var rollback = connection.CreateCommand())
+            {
+                rollback.CommandText = "ROLLBACK";
+                rollback.ExecuteNonQuery();
+            }
+
+            throw new InvalidOperationException("the original error");
+        }
+    }
+
+    [Fact]
     public void DeletedUser_IsAnonymisedEverywhere()
     {
         var store = Store(Open());

@@ -50,6 +50,7 @@ public sealed class ButtonWatch : IHostedService, IDisposable
     private readonly TimeProvider _time;
     private readonly ILogger<ButtonWatch> _logger;
     private readonly SemaphoreSlim _checking = new(1, 1);
+    private bool _unavailableLogged;
     private CancellationTokenSource? _stop;
     private Task? _loop;
 
@@ -233,6 +234,16 @@ public sealed class ButtonWatch : IHostedService, IDisposable
         try
         {
             _store.RecordPlayStart(e.ClientName, e.Session?.ApplicationVersion);
+            _unavailableLogged = false;
+        }
+        catch (StorageUnavailableException ex)
+        {
+            // Logged once until it works again, not once per playback.
+            if (!_unavailableLogged)
+            {
+                _unavailableLogged = true;
+                _logger.LogWarning(ex, "Couldn't record playback starts while the Media Reports database is unavailable");
+            }
         }
         catch (Exception ex)
         {

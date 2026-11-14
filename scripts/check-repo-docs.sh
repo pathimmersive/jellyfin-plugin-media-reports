@@ -78,6 +78,42 @@ done < <(find . \( -path ./.git -o -path ./artifacts -o -name bin -o -name obj -
 echo "== logo images match their SVG source"
 dotnet run scripts/render-logo.cs -- --check || fail "a logo PNG differs from its SVG source"
 
+echo "== the API reference covers every route"
+py() {
+  if command -v python3 >/dev/null 2>&1 && python3 -c "" >/dev/null 2>&1; then python3 "$@"; else python "$@"; fi
+}
+if [[ -s docs/api.md ]]; then
+  contains README.md "docs/api\.md" "link the API reference"
+  # Each controller's [Route] joined with each action's [HttpX] template, constants resolved,
+  # against the `### `METHOD /path`` headings of docs/api.md; a route on one side only fails.
+  py - docs/api.md $(find src -name '*.cs' -not -path '*/obj/*' -not -path '*/bin/*') <<'PY' || fail "docs/api.md and the controllers' routes differ"
+import re, sys
+doc, files = sys.argv[1], sys.argv[2:]
+texts = {f: open(f, encoding="utf-8").read() for f in files}
+consts = {}
+for t in texts.values():
+    for cls, body in re.findall(r"class (\w+)\b(.*?)(?=\nclass |\npublic |\Z)", t, re.S):
+        for name, value in re.findall(r'const string (\w+) = "([^"]*)";', body):
+            consts[cls + "." + name] = value
+routes = set()
+for t in texts.values():
+    for prefix, body in re.findall(r'\[Route\("([^"]+)"\)\]\s*(?:\[[^\]]*\]\s*)*public sealed class \w+(.*?)(?=\n\[|\Z)', t, re.S):
+        for verb, arg in re.findall(r"\[Http(Get|Post|Put|Patch|Delete)(?:\(([^)]*)\))?\]", body):
+            arg = arg.strip()
+            template = arg.strip('"') if arg.startswith('"') else consts.get(arg, arg) if arg else ""
+            routes.add(verb.upper() + " /" + "/".join(x for x in (prefix, template) if x))
+documented = set(re.findall(r"^### `([A-Z]+ /[^`?]+)", open(doc, encoding="utf-8").read(), re.M))
+for r in sorted(routes - documented):
+    print("FAIL: docs/api.md does not document " + r, file=sys.stderr)
+for r in sorted(documented - routes):
+    print("FAIL: docs/api.md documents " + r + ", which no controller declares", file=sys.stderr)
+print("routes: %d declared, %d documented" % (len(routes), len(documented)))
+sys.exit(1 if routes != documented or not routes else 0)
+PY
+else
+  fail "docs/api.md is missing or empty"
+fi
+
 echo "== third-party notices cover the published plugin"
 if [[ -z "$deps" ]]; then
   publish_dir="artifacts/docs-check/publish"

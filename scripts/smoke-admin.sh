@@ -121,6 +121,11 @@ expect() {
   if [[ -n "$code_want" ]]; then
     [[ "$(json "d.get('code') or d.get('Code')" <"$work/results/last.json")" == "$code_want" ]] || fail "$3 $4 did not say $code_want: $(cat "$work/results/last.json")"
   fi
+  # Every refusal carries the error body: a code and a message.
+  if (( want >= 400 )); then
+    json "bool((d.get('Code') or d.get('code')) and (d.get('Message') or d.get('message')))" <"$work/results/last.json" 2>/dev/null | grep -x True >/dev/null \
+      || fail "$3 $4 answered $got without a Code and Message: $(cat "$work/results/last.json")"
+  fi
   echo "$3 $4 -> $got ${code_want}"
 }
 
@@ -179,13 +184,18 @@ echo "== access"
 for call in "GET /MediaReports/Admin/Summary" "GET /MediaReports/Admin/Issues" "GET /MediaReports/Admin/Issues/$movie_issue" \
   "PATCH /MediaReports/Admin/Issues/$movie_issue" "POST /MediaReports/Admin/Issues/Status" \
   "POST /MediaReports/Admin/Issues/$movie_issue/Refresh" "POST /MediaReports/Admin/Issues/$movie_issue/Scan" \
-  "GET /MediaReports/Admin/Settings" "PUT /MediaReports/Admin/Settings" "GET /MediaReports/Admin/Export"; do
+  "GET /MediaReports/Admin/Settings" "PUT /MediaReports/Admin/Settings" "GET /MediaReports/Admin/Export" \
+  "GET /MediaReports/Admin/Findings" "POST /MediaReports/Admin/Findings/1/Dismiss" \
+  "POST /MediaReports/Admin/Settings/TestAlert" "GET /MediaReports/Metrics"; do
   set -- $call
-  expect 401 "" "" "" "$1" "$2" '{}'
-  got="$(req "Bob Laptop" "$bob" "$1" "$2" '{"status":"Fixed","issueIds":[1]}')"
-  [[ "$got" == 403 ]] || fail "a non-admin got $got from $1 $2"
+  expect 401 unauthorized "" "" "$1" "$2" '{}'
+  expect 403 forbidden "Bob Laptop" "$bob" "$1" "$2" '{"status":"Fixed","issueIds":[1]}'
 done
-echo "non-admin refused on every endpoint"
+echo "non-admin refused on every endpoint, each with the error body"
+expect 400 bad-request "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$movie_issue" '{"status": ["Fixed"]}'
+expect 400 bad-request "admin box" "$admin" GET /MediaReports/Admin/Issues/not-a-number
+expect 404 not-found "admin box" "$admin" GET /MediaReports/Admin/Nothing
+expect 405 method-not-allowed "admin box" "$admin" DELETE /MediaReports/Admin/Summary
 expect 404 issue-not-found "admin box" "$admin" GET /MediaReports/Admin/Issues/999999
 
 echo "== summary and the new count"

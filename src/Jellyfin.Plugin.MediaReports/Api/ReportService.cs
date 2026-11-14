@@ -88,7 +88,7 @@ public sealed class ReportService
             Type = TypeName(item),
             Reasons = reasons.Where(r => !r.Retired).Select(r => new ReasonOption(r.Code, r.Label)).ToList(),
             OpenReports = _store.GetOpenReports(userId, item.Id)
-                .Select(r => new OpenReport(r.ReportId, r.ReasonCode, Label(reasons, r.ReasonCode), r.Status.ToString()))
+                .Select(r => new OpenReport(r.ReportId, r.ReasonCode, Label(reasons, r.ReasonCode), ReporterText.StatusCode(r.Status)))
                 .ToList(),
             Playback = Describe(playback),
         });
@@ -182,7 +182,7 @@ public sealed class ReportService
             IssueId = filed.IssueId,
             ItemId = item.Id,
             ReasonCode = request.ReasonCode,
-            Status = issue.Status.ToString(),
+            Status = ReporterText.StatusCode(issue.Status),
             CreatedAt = _time.GetUtcNow(),
             Playback = Describe(playback),
         });
@@ -210,7 +210,7 @@ public sealed class ReportService
                 Title = ReporterText.Title(r.Report),
                 ReasonLabel = Label(reasons, r.Report.ReasonCode),
                 CreatedAt = r.Report.CreatedAt,
-                Status = r.Status.ToString(),
+                Status = ReporterText.StatusCode(r.Status),
                 StatusLabel = ReporterText.StatusLabel(r.Status),
                 Unread = r.Unread,
                 ExpiresAt = expires,
@@ -273,7 +273,7 @@ public sealed class ReportService
             Note = report.Note,
             Device = report.Device,
             CreatedAt = report.CreatedAt,
-            Status = mine.Status.ToString(),
+            Status = ReporterText.StatusCode(mine.Status),
             StatusLabel = ReporterText.StatusLabel(mine.Status),
             CanWithdraw = mine.Status == IssueStatus.New,
             History = [new MyReportStep(report.CreatedAt, "Reported"), .. changes],

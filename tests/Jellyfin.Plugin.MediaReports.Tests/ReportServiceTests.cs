@@ -147,7 +147,7 @@ public sealed class ReportServiceTests : IDisposable
         var open = Assert.Single(context.OpenReports);
         Assert.Equal("stutter", open.ReasonCode);
         Assert.Equal("Stutter or jitter", open.ReasonLabel);
-        Assert.Equal("New", open.Status);
+        Assert.Equal("new", open.Status);
     }
 
     [Fact]
@@ -160,7 +160,7 @@ public sealed class ReportServiceTests : IDisposable
         var second = Ok(_service.File(_bob.Id, null, new FileReportRequest(MovieId, "stutter", null)));
 
         Assert.Equal(first.IssueId, second.IssueId);
-        Assert.Equal("New", first.Status);
+        Assert.Equal("new", first.Status);
         var stored = _store.GetReport(first.Id)!;
         Assert.Equal("keeps jumping back", stored.Note);
         Assert.Equal("alice", stored.ReporterName);
@@ -295,6 +295,41 @@ public sealed class ReportServiceTests : IDisposable
     }
 
     [Fact]
+    public void ReporterEndpoints_GiveReplacedVerifyAsBeingLookedAt_NeverTheStorageName()
+    {
+        var filed = Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)));
+        _store.SetStatus(filed.IssueId, IssueStatus.ReplacedVerify, null);
+
+        var row = Ok(_service.Mine(_alice.Id)).Reports[0];
+        var detail = Ok(_service.MineDetail(_alice.Id, filed.Id));
+        var open = Ok(_service.GetContext(_alice.Id, null, MovieId)).OpenReports[0];
+
+        Assert.Equal(("being-looked-at", "being-looked-at", "being-looked-at"), (row.Status, detail.Status, open.Status));
+        Assert.Equal("Being looked at", row.StatusLabel);
+    }
+
+    [Fact]
+    public void StatusCode_MapsEveryStatusIntoTheDocumentedSet()
+    {
+        var expected = new Dictionary<IssueStatus, string>
+        {
+            [IssueStatus.New] = "new",
+            [IssueStatus.Investigating] = "investigating",
+            [IssueStatus.ReplacedVerify] = "being-looked-at",
+            [IssueStatus.Fixed] = "fixed",
+            [IssueStatus.WontFix] = "wont-fix",
+            [IssueStatus.Duplicate] = "duplicate",
+            [IssueStatus.CantReproduce] = "cant-reproduce",
+        };
+
+        Assert.Equal(Enum.GetValues<IssueStatus>(), expected.Keys);
+        foreach (var (status, code) in expected)
+        {
+            Assert.Equal(code, ReporterText.StatusCode(status));
+        }
+    }
+
+    [Fact]
     public void Mine_MarksAReportUnreadWhenItsStatusChanges_AndReadingItClearsTheMark()
     {
         var filed = Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)));
@@ -324,7 +359,7 @@ public sealed class ReportServiceTests : IDisposable
         var detail = Ok(_service.MineDetail(_alice.Id, filed.Id));
 
         Assert.Equal(("Stutter or jitter", "Jumps back every few seconds", "Living Room TV"), (detail.ReasonLabel, detail.Note, detail.Device));
-        Assert.Equal(("WontFix", "Won't fix", false), (detail.Status, detail.StatusLabel, detail.CanWithdraw));
+        Assert.Equal(("wont-fix", "Won't fix", false), (detail.Status, detail.StatusLabel, detail.CanWithdraw));
         Assert.Equal(["Reported", "Being looked at", "Won't fix"], detail.History.Select(h => h.Label));
         var json = JsonSerializer.Serialize(detail);
         Assert.DoesNotContain("Secret", json, StringComparison.Ordinal);

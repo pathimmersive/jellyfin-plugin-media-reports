@@ -118,6 +118,11 @@ expect() {
   if [[ -n "$code_want" ]]; then
     [[ "$(json "d.get('code') or d.get('Code')" <"$work/results/last.json")" == "$code_want" ]] || fail "$3 $4 did not say $code_want: $(cat "$work/results/last.json")"
   fi
+  # Every refusal carries the error body: a code and a message.
+  if (( want >= 400 )); then
+    json "bool((d.get('Code') or d.get('code')) and (d.get('Message') or d.get('message')))" <"$work/results/last.json" 2>/dev/null | grep -x True >/dev/null \
+      || fail "$3 $4 answered $got without a Code and Message: $(cat "$work/results/last.json")"
+  fi
   echo "$3 $4 -> $got ${code_want}"
 }
 
@@ -155,12 +160,24 @@ ok "Living Room TV" "$alice_tv" POST /Sessions/Playing/Progress "$(state 1000000
 ok "Living Room TV" "$alice_tv" POST /Sessions/Playing/Stopped "$(state 200000000)" >/dev/null
 
 echo "== access"
-expect 401 "" "" "" GET "/MediaReports/Report/Context?itemId=$item_id"
-expect 401 "" "" "" GET /MediaReports/Report/Mine
-expect 401 "" "" "" GET /MediaReports/Report/Mine/1
-expect 401 "" "" "" DELETE /MediaReports/Report/Mine/1
-expect 401 "" "" "" POST /MediaReports/Report/Mine/1/Hide
-expect 401 "" "" "" POST /MediaReports/Report/Mine/HideClosed
+expect 401 unauthorized "" "" GET "/MediaReports/Report/Context?itemId=$item_id"
+expect 401 unauthorized "" "" GET /MediaReports/Report/Mine
+expect 401 unauthorized "" "" GET /MediaReports/Report/Mine/1
+expect 401 unauthorized "" "" DELETE /MediaReports/Report/Mine/1
+expect 401 unauthorized "" "" POST /MediaReports/Report/Mine/1/Hide
+expect 401 unauthorized "" "" POST /MediaReports/Report/Mine/HideClosed
+expect 401 unauthorized "" "" GET /MediaReports/Info
+expect 403 forbidden "Alice Phone" "$alice_phone" GET /MediaReports/Admin/Summary
+expect 404 not-found "Alice Phone" "$alice_phone" GET /MediaReports/Nothing/Here
+expect 400 bad-request "Alice Phone" "$alice_phone" POST /MediaReports/Report '{"itemId": '
+expect 400 bad-request "Alice Phone" "$alice_phone" GET /MediaReports/Report/Mine/not-a-number
+
+echo "== Info tells a signed-in user the plugin is installed"
+ok "Alice Phone" "$alice_phone" GET /MediaReports/Info | py -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d["ApiVersion"] == 1 and d["Version"].count(".") == 3 and d["ReportingEnabled"] is True, d
+print("Info: version %s, API version 1, reporting on" % d["Version"])' || fail "Info is wrong"
 expect 404 item-not-found "Alice Phone" "$alice_phone" GET "/MediaReports/Report/Context?itemId=$(py -c 'import uuid;print(uuid.uuid4())')"
 
 echo "== context from alice's phone names the TV playback"
@@ -208,6 +225,8 @@ expect 400 reason-not-allowed "Alice Phone" "$alice_phone" POST /MediaReports/Re
 set_config off
 expect 403 reporting-off "Alice Phone" "$alice_phone" POST /MediaReports/Report "{\"itemId\":\"$item_id\",\"reasonCode\":\"audio\"}"
 expect 403 reporting-off "Alice Phone" "$alice_phone" GET "/MediaReports/Report/Context?itemId=$item_id"
+ok "Alice Phone" "$alice_phone" GET /MediaReports/Info | json "d['ReportingEnabled']" | grep -x False >/dev/null \
+  || fail "with reporting off, Info did not say so"
 alice_report="$(json "d['Id']" <"$work/results/alice.json")"
 ok "Alice Phone" "$alice_phone" GET /MediaReports/Report/Mine | json "len(d['Reports'])" | grep -x 1 >/dev/null \
   || fail "with reporting off, Mine did not list alice's report"
@@ -224,7 +243,7 @@ r = sys.argv[1]
 load = lambda n: json.load(open(os.path.join(r, n)))
 alice, bob, after, export = load("alice.json"), load("bob.json"), load("context-after.json"), load("export.json")
 assert alice["IssueId"] == bob["IssueId"], (alice, bob)
-assert alice["Status"] == "New" and alice["Playback"]["DeviceName"] == "Living Room TV"
+assert alice["Status"] == "new" and alice["Playback"]["DeviceName"] == "Living Room TV", alice
 assert [o["ReasonCode"] for o in after["OpenReports"]] == ["stutter"], after["OpenReports"]
 reports = export["reports"]
 assert len(reports) == 3, len(reports)
@@ -359,8 +378,10 @@ load = lambda n: json.load(open(os.path.join(r, n)))
 title = load("context.json")["Name"]
 before, after, detail, read, bob = (load(n) for n in ("mine-before.json", "mine-after.json", "mine-detail.json", "mine-read.json", "bob-mine.json"))
 assert [x["ReasonLabel"] for x in before["Reports"]] == ["Audio problem", "Stutter or jitter"] and before["Unread"] == 0, before
+assert [x["Status"] for x in before["Reports"]] == ["new", "new"], before
 assert len(after["Reports"]) == 1 and after["Unread"] == 1 and after["Reports"][0]["Unread"], after
-assert after["Reports"][0]["StatusLabel"] == "Duplicate", after
+assert (after["Reports"][0]["Status"], after["Reports"][0]["StatusLabel"]) == ("duplicate", "Duplicate"), after
+assert detail["Status"] == "duplicate", detail
 assert after["Reports"][0]["ExpiresLabel"] == "Expires in 12 months" and after["Reports"][0]["CanHide"] is True, after
 assert [h["Label"] for h in detail["History"]] == ["Reported", "Being looked at", "Fixed", "Duplicate"], detail["History"]
 assert detail["Note"] == "keeps jumping back" and detail.get("Device") == "Living Room TV" and detail["CanWithdraw"] is False, detail

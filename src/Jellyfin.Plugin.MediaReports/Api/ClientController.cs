@@ -11,6 +11,7 @@ namespace Jellyfin.Plugin.MediaReports.Api;
 /// The Report button script's load signal, so the plugin notices when it stops loading.
 /// </summary>
 [ApiController]
+[ApiErrors]
 [Authorize]
 [Route("MediaReports/Client")]
 public sealed class ClientController : ControllerBase

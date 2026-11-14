@@ -54,6 +54,7 @@ public sealed partial class IndexPageStartupFilter : IStartupFilter
     public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
     {
         LogAdded(_logger);
+        app.UseMiddleware<Api.ApiErrorMiddleware>();
         app.UseMiddleware<IndexPageMiddleware>();
         next(app);
     };

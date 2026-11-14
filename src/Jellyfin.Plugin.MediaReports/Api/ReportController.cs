@@ -12,6 +12,7 @@ namespace Jellyfin.Plugin.MediaReports.Api;
 /// The signed-in user's endpoints for filing a report. Every call acts as the caller; none takes a user id.
 /// </summary>
 [ApiController]
+[ApiErrors]
 [Authorize]
 [Route("MediaReports/Report")]
 public sealed class ReportController : ControllerBase

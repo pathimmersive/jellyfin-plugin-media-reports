@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using MediaBrowser.Controller.Net;
+using Jellyfin.Plugin.MediaReports.Api;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -11,6 +12,7 @@ namespace Jellyfin.Plugin.MediaReports.Playback;
 /// Serves the signed-in user's own live and recent playbacks.
 /// </summary>
 [ApiController]
+[ApiErrors]
 [Authorize]
 [Route("MediaReports")]
 public sealed class PlaybacksController : ControllerBase

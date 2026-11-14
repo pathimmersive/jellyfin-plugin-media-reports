@@ -116,6 +116,10 @@ Admins see everything above. A user sees only their own reports, with the status
 - Admins can download every report, issue and history entry as one JSON file from the plugin's settings.
 - Uninstalling the plugin leaves `media-reports/` in the data folder. Delete that folder to remove all reports.
 
+## API for other clients
+
+Any Jellyfin client can file and follow reports through the plugin's HTTP API. Call `GET /MediaReports/Info` to check the plugin is installed. [docs/api.md](docs/api.md) covers every route, with its sign-in, request, answer and error codes.
+
 ## License
 
 [GPL-3.0-or-later](LICENSE). Third-party components are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

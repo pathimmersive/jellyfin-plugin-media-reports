@@ -115,7 +115,7 @@ call GET /Startup/User >/dev/null
 call POST /Startup/User '{"Name":"admin","Password":"admin-password"}'
 call POST /Startup/Complete
 token="$(call POST /Users/AuthenticateByName '{"Username":"admin","Pw":"admin-password"}' | json "d['AccessToken']")"
-for user in alice bob carol; do
+for user in alice bob carol filler1 filler2 filler3 filler4 filler5; do
   call POST /Users/New "{\"Name\":\"$user\",\"Password\":\"$user-password\"}" >/dev/null
 done
 call POST "/Library/VirtualFolders?name=Movies&collectionType=movies&refreshLibrary=false" '{"LibraryOptions":{"PathInfos":[{"Path":"/media/movies"}]}}'
@@ -537,9 +537,11 @@ with sync_playwright() as p:
     user.close()
 
     # ---- 120 open issues: pages of 50 --------------------------------------------------
-    for item in FILLERS:
+    # Spread over five users, since one user can file at most 30 reports an hour.
+    filers = [sign_in_api("filler%d" % n, "Filler Phone %d" % n) for n in range(1, 6)]
+    for n, item in enumerate(FILLERS):
         for reason in ["wont-play", "playback-error", "poor-quality", "stutter", "audio", "subtitles", "metadata", "other"]:
-            report(carol, "Carol Phone", item, reason)
+            report(filers[n % 5], "Filler Phone %d" % (n % 5 + 1), item, reason)
     open_page(page)
     wait_rows(page, 50)
     check(text(page, ".mrPageOf") == "Page 1 of 3", "120 more open issues give 50 rows on page 1 of 3 (%s)" % text(page, ".mrPageOf"))

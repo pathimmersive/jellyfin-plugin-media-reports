@@ -22,6 +22,9 @@ public enum Outcome
 
     /// <summary>The request clashes with what is stored.</summary>
     Conflict,
+
+    /// <summary>The caller sent too many in a short time.</summary>
+    TooManyRequests,
 }
 
 /// <summary>

@@ -225,6 +225,28 @@ public sealed class ReportServiceTests : IDisposable
     }
 
     [Fact]
+    public void File_RefusesThe31stReportInAnHour_CountingWithdrawnOnes_AndAlertsNothing()
+    {
+        var alerted = 0;
+        var service = new ReportService(_library.Object, _users.Object, _capture, _store, () => _config, _clock, _ => alerted++);
+        var first = _clock.GetUtcNow();
+        for (var i = 0; i < ReportService.MaxReportsPerHour; i++)
+        {
+            var filed = Ok(service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)));
+            Assert.Equal(Outcome.Ok, service.Withdraw(_alice.Id, filed.Id).Outcome);
+            _clock.Advance(TimeSpan.FromMinutes(1));
+        }
+
+        AssertRefused(service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)), Outcome.TooManyRequests, "too-many-reports");
+        Assert.Equal(0, _store.GetReportCount());
+        Assert.Equal(ReportService.MaxReportsPerHour, alerted);
+        Ok(service.File(_bob.Id, null, new FileReportRequest(MovieId, "stutter", null)));
+
+        _clock.Advance(first + TimeSpan.FromHours(1) - _clock.GetUtcNow());
+        Ok(service.File(_alice.Id, null, new FileReportRequest(MovieId, "audio", null)));
+    }
+
+    [Fact]
     public void ReportingOff_RefusesContextAndFiling_AndOnAgainWorksWithoutRestart()
     {
         _config.ReportingEnabled = false;

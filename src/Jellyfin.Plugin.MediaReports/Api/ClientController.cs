@@ -1,4 +1,6 @@
+using System.Threading.Tasks;
 using Jellyfin.Plugin.MediaReports.Storage;
+using MediaBrowser.Controller.Net;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -19,36 +21,41 @@ public sealed class ClientController : ControllerBase
     public const int MaxLength = 100;
 
     private readonly ReportStore _store;
+    private readonly IAuthorizationContext _authorization;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ClientController"/> class.
     /// </summary>
     /// <param name="store">The report store.</param>
-    public ClientController(ReportStore store)
+    /// <param name="authorization">The request's authorization context.</param>
+    public ClientController(ReportStore store, IAuthorizationContext authorization)
     {
         _store = store;
+        _authorization = authorization;
     }
 
     /// <summary>
-    /// Records that the Report button loaded in a client, at most once a minute per client.
+    /// Records that the Report button loaded in the caller's app, at most once a minute per app.
+    /// The app is the client named in the caller's Jellyfin session; a body is ignored.
     /// </summary>
-    /// <param name="request">The client's name and version.</param>
     /// <returns>No content.</returns>
     [HttpPost("Loaded")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
-    public ActionResult Loaded([FromBody] ClientLoaded request)
+    public async Task<ActionResult> Loaded()
     {
-        var client = request?.Client?.Trim();
-        if (string.IsNullOrEmpty(client) || client.Length > MaxLength || request!.Version is { Length: > MaxLength })
+        var info = await _authorization.GetAuthorizationInfo(HttpContext).ConfigureAwait(false);
+        var client = info.Client?.Trim();
+        var version = info.Version?.Trim();
+        if (string.IsNullOrEmpty(client) || client.Length > MaxLength || version is { Length: > MaxLength })
         {
-            return BadRequest(new ApiError("bad-client", $"The client name is required and, like the version, at most {MaxLength} characters."));
+            return BadRequest(new ApiError("bad-client", $"The session names no client, or a client or version over {MaxLength} characters."));
         }
 
         try
         {
-            _store.RecordLoad(client, request.Version?.Trim());
+            _store.RecordLoad(client, string.IsNullOrEmpty(version) ? null : version);
         }
         catch (StorageUnavailableException)
         {
@@ -59,9 +66,3 @@ public sealed class ClientController : ControllerBase
     }
 }
 
-/// <summary>
-/// The Report button script's load signal.
-/// </summary>
-/// <param name="Client">The client name, as the app reports it.</param>
-/// <param name="Version">The client version.</param>
-public sealed record ClientLoaded(string? Client, string? Version);

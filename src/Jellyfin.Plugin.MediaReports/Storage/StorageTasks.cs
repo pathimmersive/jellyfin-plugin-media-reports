@@ -33,7 +33,7 @@ public sealed class PurgeClosedReportsTask : IScheduledTask
     public string Key => "MediaReportsPurge";
 
     /// <inheritdoc />
-    public string Description => "Deletes closed media reports older than the retention period set in Media Reports, and suspected problems last seen over 30 days ago. Open reports are never deleted.";
+    public string Description => "Deletes closed media reports older than the retention period set in Media Reports, and suspected problems last seen over 30 days ago, and apps not seen for 90 days. Open reports are never deleted.";
 
     /// <inheritdoc />
     public string Category => Plugin.PluginName;
@@ -43,7 +43,9 @@ public sealed class PurgeClosedReportsTask : IScheduledTask
     {
         var purged = _store.Purge();
         var findings = _store.PurgeFindings();
+        var clients = _store.PurgeClients();
         _logger.LogInformation("Purged {Count} closed media report issues and {Findings} suspected problems last seen over {Days} days ago", purged, findings, ReportStore.FindingDays);
+        _logger.LogInformation("Forgot {Count} apps not seen for {Days} days", clients, ReportStore.ClientDays);
         progress.Report(100);
         return Task.CompletedTask;
     }

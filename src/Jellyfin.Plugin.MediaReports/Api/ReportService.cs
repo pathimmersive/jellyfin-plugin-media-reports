@@ -23,6 +23,11 @@ public sealed class ReportService
     /// </summary>
     public const int MaxNoteLength = 1000;
 
+    /// <summary>
+    /// The most reports one user can file in an hour.
+    /// </summary>
+    public const int MaxReportsPerHour = 30;
+
     private readonly ILibraryManager _library;
     private readonly IUserManager _users;
     private readonly PlaybackCapture _capture;
@@ -30,6 +35,7 @@ public sealed class ReportService
     private readonly Func<PluginConfiguration> _config;
     private readonly TimeProvider _time;
     private readonly Action<StoredReport>? _filed;
+    private readonly Dictionary<Guid, Queue<DateTimeOffset>> _recentFilings = [];
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ReportService"/> class.
@@ -103,6 +109,11 @@ public sealed class ReportService
             return ReportingOff<FiledReportView>();
         }
 
+        if (RecentFilings(userId) >= MaxReportsPerHour)
+        {
+            return ServiceResult<FiledReportView>.Refuse(Outcome.TooManyRequests, "too-many-reports", $"You've sent {MaxReportsPerHour} reports in the past hour. Try again later.");
+        }
+
         var item = FindItem(userId, request.ItemId);
         if (item is null)
         {
@@ -162,6 +173,7 @@ public sealed class ReportService
             Snapshot = playback is null ? null : ReportSnapshot.FromPlayback(playback),
         });
 
+        RememberFiling(userId);
         _filed?.Invoke(_store.GetReport(filed.ReportId)!);
         var issue = _store.GetIssue(filed.IssueId)!;
         return ServiceResult<FiledReportView>.Success(new FiledReportView
@@ -339,4 +351,42 @@ public sealed class ReportService
 
     private static ServiceResult<T> ReportNotFound<T>() =>
         ServiceResult<T>.Refuse(Outcome.NotFound, "report-not-found", "You have no report with that id.");
+
+    private int RecentFilings(Guid userId)
+    {
+        lock (_recentFilings)
+        {
+            if (!_recentFilings.TryGetValue(userId, out var times))
+            {
+                return 0;
+            }
+
+            var cutoff = _time.GetUtcNow() - TimeSpan.FromHours(1);
+            while (times.Count > 0 && times.Peek() <= cutoff)
+            {
+                times.Dequeue();
+            }
+
+            if (times.Count == 0)
+            {
+                _recentFilings.Remove(userId);
+            }
+
+            return times.Count;
+        }
+    }
+
+    private void RememberFiling(Guid userId)
+    {
+        lock (_recentFilings)
+        {
+            if (!_recentFilings.TryGetValue(userId, out var times))
+            {
+                times = new Queue<DateTimeOffset>();
+                _recentFilings[userId] = times;
+            }
+
+            times.Enqueue(_time.GetUtcNow());
+        }
+    }
 }

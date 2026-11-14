@@ -217,8 +217,8 @@ db = sqlite3.connect(sys.argv[1])
 tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
 assert {"client_seen", "plugin_state", "finding"} <= tables, tables
 rows = db.execute("SELECT client, version, first_seen, last_load, last_play FROM client_seen").fetchall()
-assert len(rows) == 1 and rows[0][0] == "Jellyfin Web" and rows[0][1] == "10.12.0" and rows[0][3], rows
-print("client_seen: one row for Jellyfin Web with its last load, kept on disk; the finding table exists")
+assert len(rows) == 1 and rows[0][0] == "media-reports-smoke" and rows[0][1] == "1.0.0" and rows[0][3], rows
+print("client_seen: one row for the session's app with its last load, kept on disk; the finding table exists")
 PY
 echo "== add a suspected problem for the reporter and one for another user"
 py - "$work/after-restart.db" "$reporter_id" <<'PY'

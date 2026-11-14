@@ -85,7 +85,7 @@ Everything stays on your Jellyfin server. Data leaves the server only through th
 
 - `client`, `version`: the app's name and version.
 - `first_seen`, `last_load`, `last_play`: when the row was written, when the Report button last loaded in that app, and when a playback last started in it.
-- It holds no user, device or address.
+- It holds no user, device or address. At most 50 apps are kept; a new one replaces the one seen least recently.
 
 `plugin_state`: `key` and `value`, a few named values kept across restarts: whether the Report button counts as stopped, and when reporting was last turned back on.
 
@@ -106,6 +106,7 @@ Admins see everything above. A user sees only their own reports, with the status
 - Open reports are never deleted.
 - Closed reports are deleted, with their history, 365 days after they closed by the daily **Purge closed media reports** task. Change the period in the plugin's settings; 0 keeps them forever.
 - Suspected problems are deleted by the same task 30 days after they were last seen.
+- Apps in `client_seen` are deleted by the same task 90 days after they last loaded the button or played.
 - When a Jellyfin user is deleted, their reports and suspected problems are kept for the admin, but their user id, user name and device names are removed from them.
 - Users can withdraw their own report while it is still New.
 

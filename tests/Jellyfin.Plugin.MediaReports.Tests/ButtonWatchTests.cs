@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json.Nodes;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.MediaReports.Api;
@@ -147,6 +148,30 @@ public sealed class ButtonWatchTests : IDisposable
         var web = Assert.Single(_store.GetClientsSeen(), c => c.Client == "Jellyfin Web");
         Assert.Equal("10.12.1", web.Version);
         Assert.Equal(_clock.GetUtcNow(), web.LastLoad);
+    }
+
+    [Fact]
+    public void Clients_KeepTheNewest50_AndTheDailyPurgeForgetsAppsUnseenFor90Days()
+    {
+        _store.RecordPlayStart("Jellyfin Web", "10.12.0");
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        for (var i = 1; i <= ReportStore.MaxClients; i++)
+        {
+            _store.RecordLoad("Made Up " + i, null);
+            _clock.Advance(TimeSpan.FromMinutes(1));
+        }
+
+        var kept = _store.GetClientsSeen().Select(c => c.Client).ToList();
+        Assert.Equal(ReportStore.MaxClients, kept.Count);
+        Assert.DoesNotContain("Jellyfin Web", kept);
+        Assert.Contains("Made Up 50", kept);
+
+        _clock.Advance(TimeSpan.FromDays(ReportStore.ClientDays) - TimeSpan.FromMinutes(25));
+        _store.RecordLoad("Jellyfin Web", "10.12.1");
+        // The new load evicted "Made Up 1"; the purge takes 2 to 25, last seen over 90 days ago.
+        Assert.Equal(24, _store.PurgeClients());
+        Assert.Equal(26, _store.GetClientsSeen().Count);
+        Assert.Contains(_store.GetClientsSeen(), c => c.Client == "Jellyfin Web");
     }
 
     [Theory]

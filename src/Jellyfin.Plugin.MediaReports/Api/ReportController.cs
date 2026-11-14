@@ -62,6 +62,7 @@ public sealed class ReportController : ControllerBase
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
     public async Task<ActionResult<FiledReportView>> File([FromBody] FileReportRequest request)
     {
         var (userId, deviceId) = await Caller().ConfigureAwait(false);
@@ -193,6 +194,7 @@ public sealed class ReportController : ControllerBase
             Outcome.BadRequest => StatusCode(StatusCodes.Status400BadRequest, new ApiError(result.Code!, result.Message!)),
             Outcome.Forbidden => StatusCode(StatusCodes.Status403Forbidden, new ApiError(result.Code!, result.Message!)),
             Outcome.NotFound => StatusCode(StatusCodes.Status404NotFound, new ApiError(result.Code!, result.Message!)),
+            Outcome.TooManyRequests => StatusCode(StatusCodes.Status429TooManyRequests, new ApiError(result.Code!, result.Message!)),
             _ => StatusCode(StatusCodes.Status409Conflict, new ApiError(result.Code!, result.Message!)),
         };
     }

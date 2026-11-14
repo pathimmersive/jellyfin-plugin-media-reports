@@ -4,7 +4,8 @@
 # "phone" and from a second user. Checks the context the API describes, the playback it
 # attaches, grouping into one issue, every refusal, retired reasons and the reporting switch.
 # Then lists, opens and withdraws the users' own reports, closes an issue as the admin, and
-# reads the notice that arrives on the reporter's websocket.
+# reads the notice that arrives on the reporter's websocket. Last, checks a user's 31st report
+# in an hour is refused and that the load signal records the caller's own app.
 #
 # Usage: scripts/smoke-report.sh [--without-plugin]
 #   --without-plugin  start the server with no plugin; the script must fail
@@ -420,5 +421,23 @@ assert [x["Id"] for x in load("mine-cleared.json")["Reports"]] == [open_id], loa
 print("my reports: expiry follows the period (none at 0, 30 days, 12 months); a closed report hides while reporting is off, an open one is refused,")
 print("  it returns unread when reopened, and Clear all closed leaves only the open report; bob's report and the admin's issue are untouched")
 PY
+
+echo "== a user can file 30 reports an hour; the 31st is refused and nothing is kept"
+ok "admin box" "$admin" POST /Users/New '{"Name":"carol","Password":"carol-password"}' >/dev/null
+carol="$(sign_in "Carol Tablet" carol)"
+for _ in $(seq 30); do
+  id="$(ok "Carol Tablet" "$carol" POST /MediaReports/Report "{\"itemId\":\"$item_id\",\"reasonCode\":\"other\"}" | json "d['Id']")"
+  [[ "$(req "Carol Tablet" "$carol" DELETE "/MediaReports/Report/Mine/$id")" == 204 ]] || fail "carol could not withdraw report $id"
+done
+expect 429 too-many-reports "Carol Tablet" "$carol" POST /MediaReports/Report "{\"itemId\":\"$item_id\",\"reasonCode\":\"other\"}"
+ok "Carol Tablet" "$carol" GET /MediaReports/Report/Mine | json "len(d['Reports'])" | grep -x 0 >/dev/null || fail "the refused report was kept"
+echo "30 filed and withdrawn, the 31st refused, carol has no reports"
+
+echo "== the load signal names the caller's own app, whatever the body says"
+[[ "$(req "Carol Tablet" "$carol" POST /MediaReports/Client/Loaded '{"Client":"Made Up App","Version":"9.9.9"}')" == 204 ]] || fail "the load signal was refused"
+ok "admin box" "$admin" GET /MediaReports/Metrics >"$work/results/metrics.txt"
+grep -q '^media_reports_button_last_load_timestamp_seconds{client="media-reports-smoke"} ' "$work/results/metrics.txt" || { grep button "$work/results/metrics.txt" >&2; fail "the session's app was not recorded"; }
+! grep -q 'Made Up App' "$work/results/metrics.txt" || fail "the app named in the body was recorded"
+echo "recorded media-reports-smoke, not Made Up App"
 
 echo "PASS: filing reports on $image"

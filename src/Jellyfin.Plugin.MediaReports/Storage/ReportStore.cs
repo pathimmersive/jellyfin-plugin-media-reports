@@ -533,6 +533,7 @@ public sealed class ReportStore
             ("$client", client),
             ("$version", version),
             ("$now", Time(now)));
+        KeepNewestClients(connection);
         transaction.Commit();
         return true;
     }
@@ -545,6 +546,7 @@ public sealed class ReportStore
     public void RecordPlayStart(string client, string? version)
     {
         using var connection = _db.OpenConnection();
+        using var transaction = Transaction.Begin(connection, immediate: true);
         Execute(
             connection,
             """
@@ -554,7 +556,35 @@ public sealed class ReportStore
             ("$client", client),
             ("$version", version),
             ("$now", Now()));
+        KeepNewestClients(connection);
+        transaction.Commit();
     }
+
+    /// <summary>
+    /// The most apps kept in <c>client_seen</c>.
+    /// </summary>
+    public const int MaxClients = 50;
+
+    /// <summary>
+    /// The days an app is kept in <c>client_seen</c> after it was last seen.
+    /// </summary>
+    public const int ClientDays = 90;
+
+    /// <summary>
+    /// Deletes apps not seen (loaded or played) for <see cref="ClientDays"/> days.
+    /// </summary>
+    /// <returns>How many were deleted.</returns>
+    public int PurgeClients()
+    {
+        using var connection = _db.OpenConnection();
+        using var command = Command(connection, $"DELETE FROM client_seen WHERE {ClientLastSeen} < $cutoff", [("$cutoff", Time(_time.GetUtcNow() - TimeSpan.FromDays(ClientDays)))]);
+        return command.ExecuteNonQuery();
+    }
+
+    private const string ClientLastSeen = "MAX(COALESCE(last_load, first_seen), COALESCE(last_play, first_seen))";
+
+    private static void KeepNewestClients(SqliteConnection connection) =>
+        Execute(connection, $"DELETE FROM client_seen WHERE client NOT IN (SELECT client FROM client_seen ORDER BY {ClientLastSeen} DESC, client LIMIT {MaxClients})");
 
     /// <summary>
     /// Gets every client the plugin has seen load the Report button or start a web playback.

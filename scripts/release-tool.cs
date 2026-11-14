@@ -2,9 +2,14 @@
 // Runs as a .NET file-based app, so it needs only the .NET SDK (no zip, jq or python).
 //
 //   dotnet run scripts/release-tool.cs -- package --publish-dir <dir> --version <x.y.z.w>
-//       --out <dir> --source-url-base <url> [--changelog <text>]
-//     Writes <out>/media-reports_<version>.zip (meta.json stamped with the version)
-//     and <out>/media-reports_<version>.json, the manifest entry for that zip.
+//       --out <dir> --source-url-base <url> --changelog-file <CHANGELOG.md>
+//     Writes <out>/media-reports_<version>.zip (meta.json stamped with the version and
+//     its changelog entry) and <out>/media-reports_<version>.json, the manifest entry
+//     for that zip. Fails when the changelog has no entry for the version.
+//
+//   dotnet run scripts/release-tool.cs -- changelog --file <CHANGELOG.md> --version <x.y.z[.w]>
+//     Prints the version's entry: the text under its "## [x.y.z]" heading. A leading v
+//     is ignored, and 0.1.0 and 0.1.0.0 name the same version. Fails without an entry.
 //
 //   dotnet run scripts/release-tool.cs -- manifest --meta <meta.json> --out <manifest.json>
 //       --image-url-base <url> (--entries <dir> | --github)
@@ -15,6 +20,7 @@
 
 using System.IO.Compression;
 using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -24,7 +30,7 @@ try
 {
     if (args.Length == 0)
     {
-        throw new ArgumentException("expected a command: package or manifest");
+        throw new ArgumentException("expected a command: package, manifest or changelog");
     }
 
     var options = ParseOptions(args[1..]);
@@ -35,6 +41,9 @@ try
             break;
         case "manifest":
             await Manifest(options);
+            break;
+        case "changelog":
+            Console.WriteLine(ChangelogEntry(Required(options, "file"), Required(options, "version")));
             break;
         default:
             throw new ArgumentException($"unknown command: {args[0]}");
@@ -59,10 +68,11 @@ void Package(Dictionary<string, string> options)
 
     var outDir = Required(options, "out");
     var sourceUrlBase = Required(options, "source-url-base").TrimEnd('/');
-    var changelog = options.GetValueOrDefault("changelog", string.Empty);
+    var changelog = ChangelogEntry(Required(options, "changelog-file"), version.ToString());
 
     var meta = ReadJsonObject(Path.Combine(publishDir, "meta.json"));
     meta["version"] = version.ToString();
+    meta["changelog"] = changelog;
     var targetAbi = meta["targetAbi"]?.GetValue<string>()
         ?? throw new InvalidDataException("meta.json has no targetAbi");
 
@@ -222,6 +232,36 @@ async Task<List<JsonObject>> ReadGitHubEntries()
     }
 
     return entries;
+}
+
+// The text under the "## [x.y.z]" heading of a Keep a Changelog file, up to the next
+// "## " heading or the link definitions at the end.
+static string ChangelogEntry(string path, string version)
+{
+    var wanted = FourParts(version) ?? throw new ArgumentException($"not a release version: {version}");
+    var lines = File.ReadAllLines(path);
+    var start = Array.FindIndex(lines, line => Regex.Match(line, @"^## \[([^\]]+)\]") is { Success: true } m
+        && FourParts(m.Groups[1].Value) == wanted);
+    if (start < 0)
+    {
+        throw new InvalidDataException($"{path} has no entry for {version}");
+    }
+
+    var body = lines.Skip(start + 1)
+        .TakeWhile(line => !line.StartsWith("## ", StringComparison.Ordinal) && !Regex.IsMatch(line, @"^\[[^\]]+\]: "));
+    var entry = string.Join('\n', body).Trim();
+    return entry.Length > 0 ? entry : throw new InvalidDataException($"{path} has an empty entry for {version}");
+}
+
+static string? FourParts(string version)
+{
+    var parts = version.TrimStart('v').Split('.');
+    if (parts.Length is < 3 or > 4 || parts.Any(p => !int.TryParse(p, out _)))
+    {
+        return null;
+    }
+
+    return string.Join('.', parts.Select(int.Parse).Concat(Enumerable.Repeat(0, 4 - parts.Length)));
 }
 
 // File-based apps disable reflection-based serialization, so nodes are written directly.

@@ -5,7 +5,7 @@
   "guid": "3a96edc1-4775-492e-ba6c-c0d8abc88662",
   "name": "Media Reports",
   "overview": "Report playback and media problems to the server admin",
-  "owner": "jellyfin-plugin-media-reports",
+  "owner": "pathimmersive",
   "targetAbi": "12.0.0.0",
   "timestamp": "2026-10-21T00:00:00Z",
   "version": "0.1.0.0",

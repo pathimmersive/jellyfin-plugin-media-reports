@@ -9,20 +9,28 @@ using Xunit;
 
 namespace Jellyfin.Plugin.MediaReports.Tests;
 
-public sealed class ReadmeTests
+public sealed class StoredDataDocTests
 {
-    private const string Heading = "## What the plugin stores";
+    private const string Page = "docs/data.md";
 
     [Fact]
-    public void StoredDataSection_NamesEveryTableAndColumn()
+    public void StoredDataPage_NamesEveryTableAndColumn()
     {
-        var section = Section();
-        var missing = SchemaNames().Where(name => !section.Contains($"`{name}`", StringComparison.Ordinal)).ToList();
+        var text = PageText();
+        var missing = SchemaNames().Where(name => !text.Contains($"`{name}`", StringComparison.Ordinal)).ToList();
 
-        Assert.True(missing.Count == 0, $"README.md \"{Heading}\" does not name: {string.Join(", ", missing)}");
+        Assert.True(missing.Count == 0, $"{Page} does not name: {string.Join(", ", missing)}");
     }
 
-    private static string Section()
+    [Fact]
+    public void Readme_LinksTheStoredDataPage()
+    {
+        Assert.Contains($"]({Page})", File.ReadAllText(Path.Combine(RepoRoot(), "README.md")), StringComparison.Ordinal);
+    }
+
+    private static string PageText() => File.ReadAllText(Path.Combine(RepoRoot(), Page));
+
+    private static string RepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "README.md")))
@@ -31,11 +39,7 @@ public sealed class ReadmeTests
         }
 
         Assert.NotNull(dir);
-        var text = File.ReadAllText(Path.Combine(dir!.FullName, "README.md"));
-        var start = text.IndexOf(Heading, StringComparison.Ordinal);
-        Assert.True(start >= 0, $"README.md has no \"{Heading}\" section");
-        var end = text.IndexOf("\n## ", start + Heading.Length, StringComparison.Ordinal);
-        return end < 0 ? text[start..] : text[start..end];
+        return dir!.FullName;
     }
 
     private static List<string> SchemaNames()

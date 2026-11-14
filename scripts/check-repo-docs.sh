@@ -31,7 +31,7 @@ contains() {
 }
 
 echo "== required files"
-for file in README.md LICENSE CONTRIBUTING.md CODE_OF_CONDUCT.md SECURITY.md THIRD_PARTY_NOTICES.md \
+for file in README.md LICENSE CONTRIBUTING.md CODE_OF_CONDUCT.md SECURITY.md THIRD_PARTY_NOTICES.md CHANGELOG.md \
   .github/ISSUE_TEMPLATE/bug.md .github/ISSUE_TEMPLATE/feature.md .github/pull_request_template.md; do
   [[ -s "$file" ]] || fail "$file is missing or empty"
 done
@@ -46,6 +46,38 @@ if [[ -s README.md ]]; then
   opening="$(awk 'NF { print; if (++n == 2) exit }' README.md | tr -d '\r' | tr '\n' ' ')"
   [[ "$opening" =~ ^\<p\ align=\"center\"\>\ +\<picture\> ]] || fail "README.md does not open with the logo centred"
   contains README.md "https://pathimmersive\.github\.io/jellyfin-plugin-media-reports/manifest\.json" "give the plugin repository URL"
+  # What a new admin needs, one section each.
+  for heading in "Features" "Which apps get the Report button" "How the Report button reaches Jellyfin Web" \
+    "Install" "Settings" "Update" "Uninstall" "Troubleshooting" "Privacy and stored data" "Versioning"; do
+    grep -qx "## $heading" README.md || fail "README.md has no \"## $heading\" section"
+  done
+  if grep -Eiq "no features|not (yet )?(have|has) (any )?features" README.md; then
+    fail "README.md says the plugin has no features"
+  fi
+  contains README.md "Android TV" "say which apps get only suspected problems"
+  contains README.md "index\.html" "say the plugin changes jellyfin-web's index.html"
+  contains README.md "File Transformation" "say how the plugin sits with File Transformation"
+  contains README.md "suspected problems? (watching )?(is|are) on by default" "say suspected-problem watching is on by default"
+  contains README.md "docs/data\.md" "link what the plugin stores"
+  contains README.md "CHANGELOG\.md" "link the changelog"
+  # Every screenshot the README shows exists.
+  while IFS= read -r shot; do
+    [[ -s "$shot" ]] || fail "README.md shows $shot, which is missing"
+  done < <(grep -oE 'assets/screenshots/[A-Za-z0-9._-]+\.png' README.md | sort -u)
+  grep -q 'assets/screenshots/' README.md || fail "README.md shows no screenshots"
+fi
+if [[ -s docs/data.md ]]; then
+  contains docs/data.md "^# What the plugin stores" "open with its title"
+else
+  fail "docs/data.md is missing or empty"
+fi
+echo "== the changelog has an entry for this version"
+plugin_version="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' src/Jellyfin.Plugin.MediaReports/meta.json)"
+if [[ -s CHANGELOG.md ]]; then
+  dotnet run scripts/release-tool.cs -- changelog --file CHANGELOG.md --version "$plugin_version" >/dev/null ||
+    fail "CHANGELOG.md has no entry for $plugin_version, the version in meta.json"
+else
+  fail "CHANGELOG.md is missing or empty"
 fi
 if [[ -s CONTRIBUTING.md ]]; then
   contains CONTRIBUTING.md "dotnet test" "name the test command"

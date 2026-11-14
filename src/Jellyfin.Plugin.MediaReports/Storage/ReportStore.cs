@@ -280,7 +280,8 @@ public sealed class ReportStore
     }
 
     /// <summary>
-    /// Clears a deleted user from their reports and the history, keeping the reports.
+    /// Clears a deleted user from their reports, findings and the history, keeping the reports
+    /// and findings.
     /// </summary>
     /// <param name="userId">The deleted user.</param>
     /// <returns>How many reports were anonymised.</returns>
@@ -303,6 +304,7 @@ public sealed class ReportStore
 
         Execute(connection, "UPDATE event SET actor_user_id = NULL WHERE actor_user_id = $user", ("$user", user));
         Execute(connection, "DELETE FROM admin_seen WHERE user_id = $user", ("$user", user));
+        Execute(connection, "UPDATE finding SET user_id = NULL, user_name = NULL, device = NULL WHERE user_id = $user", ("$user", user));
         transaction.Commit();
         return reports.Count;
     }

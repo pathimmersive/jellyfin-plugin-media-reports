@@ -106,7 +106,7 @@ Admins see everything above. A user sees only their own reports, with the status
 - Open reports are never deleted.
 - Closed reports are deleted, with their history, 365 days after they closed by the daily **Purge closed media reports** task. Change the period in the plugin's settings; 0 keeps them forever.
 - Suspected problems are deleted by the same task 30 days after they were last seen.
-- When a Jellyfin user is deleted, their reports are kept for the admin, but their user id, user name and device names are removed from them.
+- When a Jellyfin user is deleted, their reports and suspected problems are kept for the admin, but their user id, user name and device names are removed from them.
 - Users can withdraw their own report while it is still New.
 
 ### Metrics, export and uninstall

@@ -276,6 +276,8 @@ public sealed class StorageTests : IDisposable
         var a = store.AddReport(NewReport(Alice, "stutter") with { ReporterName = "alice", Device = "Alice's iPad", Snapshot = ReportSnapshot.FromPlayback(playback) });
         var b = store.AddReport(NewReport(Alice, "audio") with { ReporterName = "alice", Device = "Alice's iPad", Snapshot = ReportSnapshot.FromPlayback(playback) });
         store.AddReport(NewReport(Bob, "audio") with { ReporterName = "bob" });
+        store.SaveFinding(new NewFinding { Kind = "freezing", PlaybackKey = "a", ItemId = Guid.NewGuid(), Title = "Pilot", UserId = Alice, UserName = "alice", Device = "Alice's iPad", Client = "Jellyfin Roku", Detail = "Position jumped back 8 s" });
+        store.SaveFinding(new NewFinding { Kind = "freezing", PlaybackKey = "b", ItemId = Guid.NewGuid(), Title = "Other", UserId = Bob, UserName = "bob", Device = "Bob's TV", Detail = "x" });
 
         Assert.Equal(2, store.AnonymiseUser(Alice));
 
@@ -294,6 +296,13 @@ public sealed class StorageTests : IDisposable
         Assert.DoesNotContain("alice", everything, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("bob", everything, StringComparison.Ordinal);
         Assert.Equal(2, Count("SELECT COUNT(*) FROM event WHERE kind = 'anonymised'"));
+
+        var kept = store.GetFindings(null, 10).Single(f => f.Title == "Pilot");
+        Assert.Equal("freezing", kept.Kind);
+        Assert.Equal("Position jumped back 8 s", kept.Detail);
+        Assert.Null(kept.UserName);
+        Assert.Null(kept.Device);
+        Assert.Equal("Bob's TV", store.GetFindings(null, 10).Single(f => f.Title == "Other").Device);
     }
 
     [Fact]

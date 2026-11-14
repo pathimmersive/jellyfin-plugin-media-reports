@@ -207,6 +207,34 @@ public class PlaybackCaptureTests
     }
 
     [Fact]
+    public void EachProgressEvent_HandsTheWatcherASample()
+    {
+        var samples = new List<SuspectSample>();
+        _capture.Samples = samples.Add;
+        var session = Session("s1", Guid.NewGuid(), "Living Room TV", PlayMethod.Transcode, transcoding: true, position: 600_000_000);
+        session.TranscodingInfo!.Framerate = 3.2f;
+        session.TranscodingInfo.CompletionPercentage = 40;
+        session.TranscodingInfo.Height = 720;
+        session.PlayState!.IsPaused = true;
+
+        Progress(session);
+
+        var sample = Assert.Single(samples);
+        Assert.Equal("s1", sample.SessionId);
+        Assert.Equal(Movie, sample.ItemId);
+        Assert.Equal(600_000_000, sample.PositionTicks);
+        Assert.True(sample.IsPaused);
+        Assert.Equal("Transcode", sample.PlayMethod);
+        Assert.Equal(3.2f, sample.TranscodeFps);
+        Assert.Equal(40, sample.Completion);
+        Assert.Equal(1_000_000, sample.OutputBitrate);
+        Assert.Equal(720, sample.OutputHeight);
+        Assert.Contains("ContainerBitrateExceedsLimit", sample.TranscodeReasons);
+        Assert.Equal("Test Client", sample.Client);
+        Assert.Equal(_clock.GetUtcNow(), sample.At);
+    }
+
+    [Fact]
     public void NewInstall_RetentionWindowIs24Hours()
     {
         Assert.Equal(24, new Configuration.PluginConfiguration().PlaybackRetentionHours);

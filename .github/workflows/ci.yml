@@ -56,6 +56,8 @@ jobs:
       - run: bash scripts/smoke-metrics.sh
       # Renames and overwrites files in the library and checks that reports follow them.
       - run: bash scripts/smoke-relink.sh
+      # Plays scripted TV sessions that freeze, are capped at 1 Mbps or overload the transcoder, and checks the findings.
+      - run: bash scripts/smoke-suspected.sh
       # Drives Jellyfin Web in headless Chromium and checks where the Report button appears.
       - name: Install Playwright for the web smoke
         run: |

@@ -36,6 +36,15 @@ public sealed class AdminService
     // Three or more episode issues of one season with one reason are shown as a season row.
     private const int RollupThreshold = 3;
 
+    // The kinds of suspected problem, in the order the tab shows their tiles.
+    private static readonly IReadOnlyDictionary<string, string> FindingLabels = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        [Playback.SuspectWatcher.Freezing] = "Freezing",
+        [Playback.SuspectWatcher.SlowTranscode] = "Transcoder too slow",
+        [Playback.SuspectWatcher.LowQuality] = "Low quality",
+        [Playback.SuspectWatcher.PlaybackError] = "Playback error mid-play",
+    };
+
     private readonly ReportStore _store;
     private readonly ILibraryManager _library;
     private readonly IUserManager _users;
@@ -79,13 +88,87 @@ public sealed class AdminService
     /// <returns>The summary.</returns>
     public AdminSummary GetSummary(Guid adminId, bool markSeen)
     {
+        return Summary(adminId, markSeen);
+    }
+
+    /// <summary>
+    /// Lists the suspected problems for the tab: each kind with its 7-day count, and the kept
+    /// findings not dismissed, newest first, noting other devices with findings on the same title.
+    /// </summary>
+    /// <param name="kind">Only this kind, or null for all.</param>
+    /// <returns>The list, or a refusal for an unknown kind.</returns>
+    public ServiceResult<FindingList> ListFindings(string? kind)
+    {
+        if (kind is not null && !FindingLabels.ContainsKey(kind))
+        {
+            return ServiceResult<FindingList>.Refuse(Outcome.BadRequest, "unknown-kind", "There is no such kind of suspected problem.");
+        }
+
+        var counts = _store.GetRecentFindingCounts(7);
+        var devices = _store.GetRecentFindingDevices(7);
+        var rows = _store.GetFindings(kind, 200).Select(f => new FindingRow
+        {
+            Id = f.Id,
+            Kind = f.Kind,
+            KindLabel = FindingLabels.GetValueOrDefault(f.Kind, f.Kind),
+            ItemId = f.ItemId,
+            Title = f.Title,
+            Line = FindingLine(f),
+            UserName = f.UserName,
+            Device = f.Device,
+            Client = f.Client,
+            FirstSeen = f.FirstSeen,
+            LastSeen = f.LastSeen,
+            Detail = f.Detail,
+            OtherDevices = devices.TryGetValue(f.ItemId, out var seen) ? seen.Count(d => !string.Equals(d, f.Device ?? string.Empty, StringComparison.Ordinal)) : 0,
+        }).ToList();
+        return ServiceResult<FindingList>.Success(new FindingList
+        {
+            Kinds = FindingLabels.Select(k => new FindingKind(k.Key, k.Value, counts.GetValueOrDefault(k.Key))).ToList(),
+            Rows = rows,
+        });
+    }
+
+    /// <summary>
+    /// Hides a finding from the tab at once.
+    /// </summary>
+    /// <param name="findingId">The finding.</param>
+    /// <returns>Success, or not found.</returns>
+    public ServiceResult<bool> DismissFinding(long findingId) =>
+        _store.DismissFinding(findingId)
+            ? ServiceResult<bool>.Success(true)
+            : ServiceResult<bool>.Refuse(Outcome.NotFound, "finding-not-found", "There is no such suspected problem.");
+
+    private static string? FindingLine(StoredFinding finding)
+    {
+        if (finding.SeriesName is null)
+        {
+            return null;
+        }
+
+        var line = finding.SeriesName;
+        if (finding.SeasonNumber is { } season)
+        {
+            line += " · S" + season.ToString(CultureInfo.InvariantCulture);
+            if (finding.EpisodeNumber is { } episode)
+            {
+                line += " E" + episode.ToString(CultureInfo.InvariantCulture);
+            }
+        }
+
+        return line;
+    }
+
+    private AdminSummary Summary(Guid adminId, bool markSeen)
+    {
         var seen = _store.GetAdminSeen(adminId);
         var open = _store.GetIssuesWithReports(closed: false);
         var summary = new AdminSummary(
             open.Count,
             open.Sum(i => i.Reports.Count),
             open.Count(i => IsNew(i.Reports, seen)),
-            Notifications.ButtonWatch.Evaluate(_store, _config(), DateTimeOffset.UtcNow).Stopped);
+            Notifications.ButtonWatch.Evaluate(_store, _config(), DateTimeOffset.UtcNow).Stopped,
+            _store.GetRecentFindingCounts(7).Values.Sum());
         if (markSeen)
         {
             _store.MarkAdminSeen(adminId);

@@ -146,6 +146,30 @@ public sealed class AdminController : ControllerBase
     }
 
     /// <summary>
+    /// Lists the suspected problems: each kind's 7-day count and the findings not dismissed.
+    /// </summary>
+    /// <param name="kind">Only this kind.</param>
+    /// <returns>The list.</returns>
+    [HttpGet("Findings")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public ActionResult<FindingList> ListFindings([FromQuery] string? kind = null) =>
+        Answer(() => _service.ListFindings(kind), StatusCodes.Status200OK);
+
+    /// <summary>
+    /// Hides a suspected problem from the tab.
+    /// </summary>
+    /// <param name="id">The finding.</param>
+    /// <returns>No content.</returns>
+    [HttpPost("Findings/{id}/Dismiss")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public ActionResult DismissFinding([FromRoute] long id) =>
+        Answer(() => _service.DismissFinding(id), StatusCodes.Status204NoContent);
+
+    /// <summary>
     /// Queues Jellyfin's scan of the folder holding the issue's title.
     /// </summary>
     /// <param name="id">The issue.</param>

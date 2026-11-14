@@ -11,7 +11,73 @@ namespace Jellyfin.Plugin.MediaReports.Api;
 /// <param name="Reports">How many reports the open issues hold.</param>
 /// <param name="New">How many open issues have a report newer than the caller last looked.</param>
 /// <param name="ButtonStopped">True when the Report button hasn't loaded in any app for 7 days while web apps played.</param>
-public sealed record AdminSummary(int OpenIssues, int Reports, int New, bool ButtonStopped = false);
+/// <param name="Suspected">Suspected problems last seen in the past 7 days and not dismissed.</param>
+public sealed record AdminSummary(int OpenIssues, int Reports, int New, bool ButtonStopped = false, int Suspected = 0);
+
+/// <summary>
+/// The Suspected problems tab: a count per kind for the past 7 days and the kept findings.
+/// </summary>
+public sealed record FindingList
+{
+    /// <summary>Gets the kinds in order, each with its label and 7-day count.</summary>
+    public IReadOnlyList<FindingKind> Kinds { get; init; } = [];
+
+    /// <summary>Gets the findings not dismissed, newest first.</summary>
+    public IReadOnlyList<FindingRow> Rows { get; init; } = [];
+}
+
+/// <summary>
+/// A kind of suspected problem with its count of findings in the past 7 days.
+/// </summary>
+/// <param name="Kind">The kind.</param>
+/// <param name="Label">The kind as the tab names it.</param>
+/// <param name="Count">Findings last seen in the past 7 days and not dismissed.</param>
+public sealed record FindingKind(string Kind, string Label, int Count);
+
+/// <summary>
+/// One suspected problem in the Suspected problems tab.
+/// </summary>
+public sealed record FindingRow
+{
+    /// <summary>Gets the id.</summary>
+    public long Id { get; init; }
+
+    /// <summary>Gets the kind.</summary>
+    public string Kind { get; init; } = string.Empty;
+
+    /// <summary>Gets the kind as the tab names it.</summary>
+    public string KindLabel { get; init; } = string.Empty;
+
+    /// <summary>Gets the item.</summary>
+    public Guid ItemId { get; init; }
+
+    /// <summary>Gets the title.</summary>
+    public string Title { get; init; } = string.Empty;
+
+    /// <summary>Gets the line beneath the title: the series, season and episode.</summary>
+    public string? Line { get; init; }
+
+    /// <summary>Gets the user's name.</summary>
+    public string? UserName { get; init; }
+
+    /// <summary>Gets the device name.</summary>
+    public string? Device { get; init; }
+
+    /// <summary>Gets the client name.</summary>
+    public string? Client { get; init; }
+
+    /// <summary>Gets when it was first seen.</summary>
+    public DateTimeOffset FirstSeen { get; init; }
+
+    /// <summary>Gets when it was last seen.</summary>
+    public DateTimeOffset LastSeen { get; init; }
+
+    /// <summary>Gets what the server saw, in words.</summary>
+    public string Detail { get; init; } = string.Empty;
+
+    /// <summary>Gets how many other devices had findings on this title in the past 7 days.</summary>
+    public int OtherDevices { get; init; }
+}
 
 /// <summary>
 /// What the admin's issue list shows.

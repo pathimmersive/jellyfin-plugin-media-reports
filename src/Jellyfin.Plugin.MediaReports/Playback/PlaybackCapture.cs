@@ -111,13 +111,49 @@ public sealed class PlaybackCapture : IHostedService
             return;
         }
 
+        PlaybackEntry entry;
         lock (_lock)
         {
             _entries.TryGetValue(session.Id, out var previous);
-            _entries[session.Id] = Observe(session, previous);
+            entry = Observe(session, previous);
+            _entries[session.Id] = entry;
             Prune();
         }
+
+        if (Samples is { } samples && entry.ItemId is { } itemId)
+        {
+            var video = entry.SourceStreams.FirstOrDefault(s => s.Type == "Video");
+            var transcoding = session.TranscodingInfo;
+            samples(new SuspectSample
+            {
+                At = entry.LastSeen,
+                SessionId = session.Id,
+                PlaySessionId = e.PlaySessionId,
+                UserId = session.UserId,
+                UserName = session.UserName,
+                Client = session.Client,
+                DeviceName = session.DeviceName,
+                ItemId = itemId,
+                PositionTicks = entry.PositionTicks,
+                IsPaused = session.PlayState?.IsPaused ?? false,
+                PlayMethod = entry.PlayMethod,
+                TranscodeFps = entry.PlayMethod == "Transcode" ? transcoding?.Framerate : null,
+                Completion = entry.PlayMethod == "Transcode" ? transcoding?.CompletionPercentage : null,
+                OutputBitrate = entry.Transcoding?.Bitrate,
+                OutputHeight = entry.Transcoding?.Height,
+                TranscodeReasons = entry.Transcoding?.TranscodeReasons ?? [],
+                SourceFps = video?.FrameRate,
+                SourceBitrate = entry.SourceBitrate ?? video?.BitRate,
+                SourceHeight = video?.Height,
+            });
+        }
     }
+
+    /// <summary>
+    /// Gets or sets where each start and progress sample goes, for the suspected-problems
+    /// watcher. It must return at once and never throw.
+    /// </summary>
+    public Action<SuspectSample>? Samples { get; set; }
 
     private void OnPlaybackStopped(object? sender, PlaybackStopEventArgs e)
     {
@@ -214,6 +250,7 @@ public sealed class PlaybackCapture : IHostedService
             SubtitleStreamIndex = playState?.SubtitleStreamIndex is >= 0 ? playState.SubtitleStreamIndex : null,
             Transcoding = transcoding,
             SourceStreams = sameSource ? previous!.SourceStreams : SourceStreams(session, itemId, mediaSourceId),
+            SourceBitrate = sameSource ? previous!.SourceBitrate : SourceItem(session, itemId, mediaSourceId)?.TotalBitrate,
         };
     }
 
@@ -234,17 +271,26 @@ public sealed class PlaybackCapture : IHostedService
             .ToList(),
     };
 
-    private IReadOnlyList<SourceStream> SourceStreams(SessionInfo session, Guid? itemId, string? mediaSourceId)
+    private BaseItem? SourceItem(SessionInfo session, Guid? itemId, string? mediaSourceId)
     {
         var item = session.FullNowPlayingItem ?? (itemId is { } id ? _libraryManager.GetItemById(id) : null);
         if (item is null)
         {
+            return null;
+        }
+
+        return Guid.TryParse(mediaSourceId, out var sourceId) && !sourceId.Equals(item.Id)
+            ? _libraryManager.GetItemById(sourceId) ?? item
+            : item;
+    }
+
+    private IReadOnlyList<SourceStream> SourceStreams(SessionInfo session, Guid? itemId, string? mediaSourceId)
+    {
+        if (SourceItem(session, itemId, mediaSourceId) is not { } source)
+        {
             return [];
         }
 
-        var source = Guid.TryParse(mediaSourceId, out var sourceId) && !sourceId.Equals(item.Id)
-            ? _libraryManager.GetItemById(sourceId) ?? item
-            : item;
         return source.GetMediaStreams()
             .Select(s => new SourceStream
             {
@@ -256,6 +302,7 @@ public sealed class PlaybackCapture : IHostedService
                 Width = s.Width,
                 Height = s.Height,
                 Channels = s.Channels,
+                FrameRate = s.RealFrameRate ?? s.AverageFrameRate,
             })
             .ToList();
     }

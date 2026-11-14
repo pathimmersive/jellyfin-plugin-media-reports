@@ -155,6 +155,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.parse
+import uuid
 import urllib.request
 
 from playwright.sync_api import sync_playwright
@@ -316,6 +317,17 @@ with sync_playwright() as p:
     entry.click()
     loaded(page)
     check(page.locator(V + ".mrJustInstalled").count() == 1 and "No reports yet" in text(page, ".mrJustInstalled"), "a fresh install shows the just-installed state")
+    check(page.locator(V + ".mrJustInstalled .mrSeeSuspected").count() == 1, "the just-installed panel links to Suspected problems")
+    if page.locator(V + ".mrJustInstalled .mrSeeSuspected").count():
+        page.locator(V + ".mrJustInstalled .mrSeeSuspected").click()
+        try:
+            page.wait_for_selector(V + ".mrSuspectedEmpty", timeout=WAIT_MS)
+        except Exception:  # noqa: BLE001
+            pass
+        empty = text(page, ".mrSuspectedEmpty") or ""
+        check("Freezing" in empty and "Transcoder too slow" in empty and "Low quality" in empty and "Playback error mid-play" in empty
+              and page.locator(V + ".mrSuspectedTab .mrCount").inner_text().strip() == "0",
+              "with no findings the Suspected problems tab explains what is watched, and its count is 0")
 
     # ---- Reports from three users ----------------------------------------------------
     alice = sign_in_api("alice", "Living Room TV")
@@ -588,6 +600,22 @@ with sync_playwright() as p:
     check(reason(page, 8).locator(".mrRetire").count() == 1 and not reason(page, 8).locator(".mrUses").inner_text().startswith("Retired"), "Restore brings a retired reason back")
     ok("PUT", "/MediaReports/Admin/Settings", ADMIN, {"ReportingEnabled": True})
 
+    # Suspected problems: one switch per kind; Freezing off is saved and kept, the others stay on.
+    page.reload()
+    settings_loaded(page)
+    switch_ids = ["#mrSuspectFreezing", "#mrSuspectSlowTranscode", "#mrSuspectLowQuality", "#mrSuspectPlaybackError"]
+    check(all(page.locator(V + i).count() == 1 and page.locator(V + i).is_checked() for i in switch_ids), "Settings has the four suspected-problem switches, all on")
+    if page.locator(V + "#mrSuspectFreezing").count():
+        page.locator(V + "#mrSuspectFreezing").uncheck()
+        page.locator(V + ".mrSaveBtn").click()
+        saved(page, "Saved")
+        page.reload()
+        settings_loaded(page)
+        kept = [page.locator(V + i).is_checked() for i in switch_ids]
+        api_now = ok("GET", "/MediaReports/Admin/Settings", ADMIN)
+        check(kept == [False, True, True, True] and api_now["SuspectFreezing"] is False and api_now["SuspectLowQuality"] is True,
+              "Freezing switched off stays off after a reload and in the API; the other three stay on (%s)" % kept)
+
     # Alerts: a bad address is refused beside its field, a saved one survives a reload, and the
     # test alert shows each address's answer (the server's own GET-only endpoint answers 405).
     page.reload()
@@ -658,10 +686,22 @@ with sync_playwright() as p:
     def ago(days):
         return time.strftime("%Y-%m-%dT%H:%M:%S.0000000Z", time.gmtime(time.time() - days * 86400))
 
+    movie_d = str(uuid.UUID(MOVIE))
+    other_d = str(uuid.UUID(next(v for k, v in movies.items() if v != MOVIE)))
+    seeded = [
+        ("freezing", "p1", movie_d, "Living Room TV", "Jellyfin Roku", "Position jumped back 13 s, 3 times in 2 minutes", 0.02),
+        ("low-quality", "p2", movie_d, "Bedroom TV", "Jellyfin Android TV", "Sent at 1.1 Mbps 720p from 20 Mbps 1080p (bitrate limit)", 0.03),
+        ("slow-transcode", "p3", other_d, "Den TV", "Jellyfin Roku", "Transcoding at 3.1 fps against 24 fps for 52 s", 0.04),
+        ("playback-error", "p4", other_d, "Den TV", "Jellyfin Roku", "Switched to transcoding: direct play error", 0.05),
+    ]
+    findings_sql = "DELETE FROM finding;" + "".join(
+        "INSERT INTO finding (kind, playback_key, item_id, item_type, title, user_name, device, client, first_seen, last_seen, detail) "
+        "VALUES ('%s', '%s', '%s', 'Movie', 'Seeded', 'alice', '%s', '%s', '%s', '%s', '%s');" % (k, key, item, dev, cl, ago(d), ago(d), det.replace("'", "''"))
+        for k, key, item, dev, cl, det, d in seeded)
     restart_server(lambda: edit_db("""
         DELETE FROM client_seen; DELETE FROM plugin_state;
         INSERT INTO client_seen (client, version, first_seen, last_load, last_play)
-        VALUES ('Jellyfin Web', '10.11.0', '%s', '%s', '%s');""" % (ago(30), ago(8), ago(1))))
+        VALUES ('Jellyfin Web', '10.11.0', '%s', '%s', '%s');""" % (ago(30), ago(8), ago(1)) + findings_sql))
     # The browser's own load signal is dropped, as if the script no longer loaded.
     watch = b.new_context(viewport={"width": 1440, "height": 900}).new_page()
     watch.route("**/MediaReports/Client/Loaded", lambda route: route.abort())
@@ -681,7 +721,60 @@ with sync_playwright() as p:
     except Exception:  # noqa: BLE001
         pass
     check(watch.locator(V + ".mrHead").count() == 1 and watch.locator(V + ".mrButtonStopped").count() == 0, "after a load signal the warning is gone")
+
+    # ---- The Suspected problems tab ------------------------------------------------------
+    def suspected_loaded(pg, query=""):
+        pg.goto(API + PAGE + "&tab=suspected" + query)
+        pg.reload()
+        pg.wait_for_selector(V + ".mrTiles", timeout=WAIT_MS)
+
+    def tile_counts(pg):
+        return pg.evaluate("""() => Object.fromEntries([...document.querySelectorAll('.page:not(.hide) .mrTile')]
+            .map(t => [t.dataset.kind, +t.querySelector('.mrTileCount').textContent]))""")
+
+    def finding_kinds(pg):
+        return pg.evaluate("() => [...document.querySelectorAll('.page:not(.hide) .mrFinding')].map(f => f.dataset.kind)")
+
+    suspected_loaded(watch)
+    check(tile_counts(watch) == {"freezing": 1, "slow-transcode": 1, "low-quality": 1, "playback-error": 1},
+          "a tile per kind shows its count for the last 7 days (%s)" % tile_counts(watch))
+    check(finding_kinds(watch) == ["freezing", "low-quality", "slow-transcode", "playback-error"], "findings are listed newest first (%s)" % finding_kinds(watch))
+    check(watch.locator(V + ".mrSuspectedTab .mrCount").inner_text().strip() == "4", "the Suspected problems tab carries the 7-day count")
+    first = watch.locator(V + ".mrFinding").first
+    who = first.locator(".mrFindingWho").inner_text()
+    check("Freezing" in first.inner_text() and "Seeded" in first.inner_text() and "Position jumped back 13 s" in first.inner_text()
+          and "alice" in who and "Living Room TV" in who and "Jellyfin Roku" in who,
+          "a finding shows its kind, title, what the server saw, user, device and client")
+    notes = watch.locator(V + ".mrOtherDevices").all_inner_texts()
+    noted = watch.evaluate("() => [...document.querySelectorAll('.page:not(.hide) .mrFinding')].filter(f => f.querySelector('.mrOtherDevices')).map(f => f.dataset.kind)")
+    check(sorted(noted) == ["freezing", "low-quality"] and all("Also seen on 1 other device" in n for n in notes),
+          "the two findings on one title from two devices each note the other device; the others don't (%s)" % noted)
+    watch.locator(V + '.mrTile[data-kind="slow-transcode"]').click()
+    watch.wait_for_function("() => { const f = [...document.querySelectorAll('.page:not(.hide) .mrFinding')]; return f.length > 0 && f.every(x => x.dataset.kind === 'slow-transcode'); }", timeout=WAIT_MS)
+    check(finding_kinds(watch) == ["slow-transcode"], "choosing a tile shows only that kind (%s)" % finding_kinds(watch))
+    suspected_loaded(watch)
+    href = watch.locator(V + ".mrFinding .mrOpen").first.get_attribute("href") or ""
+    check("#/details?id=" + MOVIE in href.replace("-", ""), "Open in Jellyfin links to the title's page (%s)" % href)
+    watch.locator(V + ".mrFinding .mrOpen").first.click()
+    watch.wait_for_url(re.compile(r".*details\?id=.*"), timeout=WAIT_MS)
+    check("details?id=" in watch.url, "Open in Jellyfin opens the title's page")
+    suspected_loaded(watch)
+    watch.locator(V + '.mrFinding[data-kind="freezing"] .mrDismiss').click()
+    watch.wait_for_function("() => !document.querySelector('.page:not(.hide) .mrFinding[data-kind=freezing]')", timeout=WAIT_MS)
+    check(watch.locator(V + ".mrFinding").count() == 3, "Dismiss removes the finding at once")
+    suspected_loaded(watch)
+    check(finding_kinds(watch) == ["low-quality", "slow-transcode", "playback-error"] and watch.locator(V + ".mrSuspectedTab .mrCount").inner_text().strip() == "3",
+          "a dismissed finding stays gone after a reload, and the tab count drops (%s)" % finding_kinds(watch))
     watch.close()
+
+    narrow = b.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True).new_page()
+    narrow.route("**/MediaReports/Client/Loaded", lambda route: route.abort())
+    sign_in(narrow, "admin")
+    suspected_loaded(narrow)
+    outside = narrow.evaluate("""() => [...document.querySelectorAll('.page:not(.hide) .mrTile, .page:not(.hide) .mrFinding button, .page:not(.hide) .mrFinding a')]
+        .map(e => e.getBoundingClientRect()).filter(r => r.left < 0 || r.right > window.innerWidth + 1).length""")
+    check(no_overflow(narrow) and outside == 0, "at 390 px the Suspected problems tab doesn't overflow and every control is on screen (%d off screen)" % outside)
+    narrow.close()
 
     # ---- Couldn't load: a database newer than this plugin ------------------------------
     newer_db = os.path.join(tempfile.mkdtemp(), "media-reports.db")

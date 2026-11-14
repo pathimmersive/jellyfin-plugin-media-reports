@@ -16,7 +16,7 @@ public sealed class ReportDatabase
     /// <summary>
     /// The schema version this build writes.
     /// </summary>
-    public const int SchemaVersion = 4;
+    public const int SchemaVersion = 5;
 
     /// <summary>
     /// The schema changes in order; entry <c>n</c> moves a database from version <c>n</c> to <c>n + 1</c>.
@@ -112,6 +112,32 @@ public sealed class ReportDatabase
             key TEXT PRIMARY KEY,
             value TEXT
         );
+        """,
+
+        // 5: suspected problems the plugin noticed on its own, one per playback and kind.
+        """
+        CREATE TABLE finding (
+            id INTEGER PRIMARY KEY,
+            kind TEXT NOT NULL,
+            playback_key TEXT NOT NULL,
+            item_id TEXT NOT NULL,
+            item_type TEXT,
+            title TEXT NOT NULL,
+            series_id TEXT,
+            series_name TEXT,
+            season_number INTEGER,
+            episode_number INTEGER,
+            user_id TEXT,
+            user_name TEXT,
+            device TEXT,
+            client TEXT,
+            first_seen TEXT NOT NULL,
+            last_seen TEXT NOT NULL,
+            detail TEXT NOT NULL,
+            dismissed_at TEXT
+        );
+        CREATE UNIQUE INDEX ux_finding_playback ON finding (playback_key, kind);
+        CREATE INDEX ix_finding_last_seen ON finding (last_seen);
         """,
     ];
 

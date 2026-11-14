@@ -26,6 +26,7 @@ public sealed class ReportMetrics
     private readonly string _version;
     private readonly TimeProvider _time;
     private readonly ConcurrentDictionary<(string Reason, string Client), long> _filed = new();
+    private readonly ConcurrentDictionary<(string Kind, string Client), long> _suspected = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ReportMetrics"/> class.
@@ -53,6 +54,14 @@ public sealed class ReportMetrics
     }
 
     /// <summary>
+    /// Counts a suspected problem the plugin just noticed.
+    /// </summary>
+    /// <param name="kind">The kind of finding.</param>
+    /// <param name="client">The client it was seen in.</param>
+    public void SuspectAdded(string kind, string? client) =>
+        _suspected.AddOrUpdate((kind, client ?? string.Empty), 1, (_, n) => n + 1);
+
+    /// <summary>
     /// Renders every series in the Prometheus text format, reading the database now. When the
     /// database didn't open, only the series that need no database are given, with storage down.
     /// </summary>
@@ -63,8 +72,10 @@ public sealed class ReportMetrics
         var openReports = 0L;
         IReadOnlyList<ClientSeen> clients = [];
         ButtonStatus? button = null;
+        IReadOnlyDictionary<string, int> recentFindings = new Dictionary<string, int>();
         try
         {
+            recentFindings = _store.GetRecentFindingCounts(7);
             issues = _store.GetOpenIssueCounts();
             openReports = _store.GetOpenReportCount();
             clients = _store.GetClientsSeen();
@@ -99,6 +110,21 @@ public sealed class ReportMetrics
             foreach (var client in clients.Where(c => c.LastLoad is not null))
             {
                 Sample(text, "media_reports_button_last_load_timestamp_seconds", client.LastLoad!.Value.ToUnixTimeSeconds(), ("client", client.Client));
+            }
+        }
+
+        Family(text, "media_reports_suspected_problems_total", "counter", "Suspected problems noticed since the server started, by kind and client.");
+        foreach (var ((kind, client), count) in _suspected.OrderBy(f => f.Key.Kind, StringComparer.Ordinal).ThenBy(f => f.Key.Client, StringComparer.Ordinal))
+        {
+            Sample(text, "media_reports_suspected_problems_total", count, ("kind", kind), ("client", client));
+        }
+
+        if (issues is not null)
+        {
+            Family(text, "media_reports_suspected_problems_recent", "gauge", "Suspected problems last seen in the past 7 days and not dismissed, by kind.");
+            foreach (var (kind, count) in recentFindings)
+            {
+                Sample(text, "media_reports_suspected_problems_recent", count, ("kind", kind));
             }
         }
 

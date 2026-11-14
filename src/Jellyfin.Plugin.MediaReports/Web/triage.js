@@ -155,6 +155,24 @@ const STYLES = `
 .mrScrape{margin:0;padding:12px;background:#141414;border-radius:4px;font-family:monospace;font-size:13px;white-space:pre;overflow-x:auto;max-width:100%;box-sizing:border-box}
 .mrCheck{display:flex;align-items:flex-start;font-size:15px;color:#fff;cursor:pointer}
 .mrCheck input{width:20px;height:20px;margin:1px 12px 0 0;flex-shrink:0;accent-color:var(--mr-accent)}
+.mrTiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+@media (max-width:900px){.mrTiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.mrTile{background:var(--mr-card);border:1px solid transparent;border-radius:8px;padding:14px 16px;text-align:left;font:inherit;color:var(--mr-text);cursor:pointer;text-decoration:none;display:block}
+.mrTile:hover{border-color:rgba(255,255,255,.2)}
+.mrTile[aria-current=true]{border-color:var(--mr-accent)}
+.mrTile .mrTileCount{display:block;font-size:28px;color:#fff;line-height:1.2}
+.mrTile .mrTileLabel{display:block;font-size:13px;color:var(--mr-muted);margin-top:2px}
+.mrFindings{list-style:none;margin:0;padding:0}
+.mrFinding{background:var(--mr-card);border-radius:8px;padding:16px 20px;display:flex;flex-wrap:wrap;align-items:flex-start}
+.mrFinding+.mrFinding{margin-top:10px}
+.mrFindingMain{flex:1 1 320px;min-width:0}
+.mrFindingMain h3{margin:0;font-size:16px;font-weight:600;color:#fff;overflow-wrap:anywhere}
+.mrFindingMain p{margin:4px 0 0;color:var(--mr-muted);font-size:14px;overflow-wrap:anywhere}
+.mrFindingSaw{color:var(--mr-text) !important}
+.mrKind{display:inline-block;margin-right:8px;padding:2px 8px;border-radius:10px;font-size:12px;font-weight:600;background:rgba(242,176,30,.18);color:#f5c451}
+.mrOtherDevices{color:#f5c451 !important}
+.mrFindingActions{display:flex;flex-wrap:wrap;margin:-4px}
+.mrFindingActions>*{margin:4px}
 .mrSave{display:flex;flex-wrap:wrap;align-items:center}
 .mrSave>*+*{margin-left:16px}
 .mrNotes{width:100%;box-sizing:border-box;min-height:96px;background:rgba(255,255,255,.08);color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:4px;padding:8px;font:inherit;font-size:14px;resize:vertical}
@@ -338,8 +356,10 @@ function header(summary) {
 
 function tabs(summary, active) {
     return h('nav', { className: 'mrTabs', 'aria-label': 'Media Reports' },
-        h('a', { className: 'mrTab', href: pageUrl({}), 'aria-current': active === 'settings' ? null : 'page' }, 'Reports',
+        h('a', { className: 'mrTab', href: pageUrl({}), 'aria-current': active ? null : 'page' }, 'Reports',
             summary ? h('span', { className: 'mrCount' }, summary.OpenIssues) : null),
+        h('a', { className: 'mrTab mrSuspectedTab', href: pageUrl({ tab: 'suspected' }), 'aria-current': active === 'suspected' ? 'page' : null }, 'Suspected problems',
+            summary ? h('span', { className: 'mrCount' }, summary.Suspected || 0) : null),
         h('a', { className: 'mrTab mrSettingsTab', href: pageUrl({ tab: 'settings' }), 'aria-current': active === 'settings' ? 'page' : null }, 'Settings'));
 }
 
@@ -363,7 +383,64 @@ function couldNotLoad(retry) {
 function justInstalled() {
     return h('div', { className: 'mrPanel mrJustInstalled' },
         h('h2', null, 'No reports yet'),
-        h('p', null, "Users report with the flag button on a title's page or in the player, in Jellyfin Web, the Android app and the webOS TV app."));
+        h('p', null, "Users report with the flag button on a title's page or in the player, in Jellyfin Web, the Android app and the webOS TV app."),
+        h('p', null, 'Playback on every app, TV apps included, is also watched for freezing, slow transcoding, low quality and playback errors. ',
+            h('a', { className: 'mrSeeSuspected', href: pageUrl({ tab: 'suspected' }) }, 'See suspected problems')));
+}
+
+// ---- The Suspected problems tab ----------------------------------------------------------
+
+const KIND_MEANINGS = {
+    'freezing': 'The reported position jumped back 5 s or more, three times within 10 minutes.',
+    'slow-transcode': "The transcode ran under 90% of the source's frame rate for 30 s or more.",
+    'low-quality': "A bitrate limit sent the picture at a quarter of the source's bitrate or less, or at a lower resolution.",
+    'playback-error': 'Direct play failed and the app switched to transcoding mid-play.'
+};
+
+function suspectedPage(params, list, refresh) {
+    const kind = params.kind || null;
+    const tiles = h('div', { className: 'mrTiles', role: 'group', 'aria-label': 'Kinds of suspected problem, last 7 days' },
+        list.Kinds.map((k) => h('a', {
+            className: 'mrTile', href: pageUrl({ tab: 'suspected', kind: kind === k.Kind ? null : k.Kind }), 'data-kind': k.Kind,
+            'aria-current': kind === k.Kind ? 'true' : null, title: KIND_MEANINGS[k.Kind] || ''
+        }, h('span', { className: 'mrTileCount' }, k.Count), h('span', { className: 'mrTileLabel' }, k.Label))));
+    if (list.Rows.length === 0 && !kind) {
+        return h('div', null, tiles, h('div', { className: 'mrPanel mrSuspectedEmpty' },
+            h('h2', null, 'No suspected problems'),
+            h('p', null, 'Media Reports watches playback on every app, TV apps included, without anyone pressing a button, and lists here what looks wrong:'),
+            h('ul', null, list.Kinds.map((k) => h('li', null, h('strong', null, k.Label), ': ', KIND_MEANINGS[k.Kind] || ''))),
+            h('p', null, 'Each kind can be switched off in Settings. Findings are kept 30 days and never become reports.')));
+    }
+    const label = kind && list.Kinds.find((k) => k.Kind === kind);
+    const rows = list.Rows.map((f) => {
+        const dismiss = h('button', { type: 'button', className: 'mrBtn mrDismiss' }, 'Dismiss');
+        const card = h('li', { className: 'mrFinding', 'data-finding': f.Id, 'data-kind': f.Kind },
+            h('div', { className: 'mrFindingMain' },
+                h('h3', null, h('span', { className: 'mrKind' }, f.KindLabel), f.Title),
+                f.Line ? h('p', null, f.Line) : null,
+                h('p', { className: 'mrFindingSaw' }, f.Detail),
+                h('p', { className: 'mrFindingWho' }, [f.UserName, f.Device, f.Client].filter(Boolean).join(' · ') + ' · ' + day(f.LastSeen)),
+                f.OtherDevices > 0 ? h('p', { className: 'mrOtherDevices' },
+                    `Also seen on ${plural(f.OtherDevices, 'other device', 'other devices')}, which points at the file rather than one device.`) : null),
+            h('div', { className: 'mrFindingActions' },
+                h('a', { className: 'mrBtn mrOpen', href: `${ApiClient.serverAddress()}/web/#/details?id=${f.ItemId}&serverId=${ApiClient.serverId()}` }, icon('open_in_new'), 'Open in Jellyfin'),
+                dismiss));
+        dismiss.addEventListener('click', () => {
+            dismiss.disabled = true;
+            // Dismiss answers 204 with no body, so it is not read as JSON.
+            ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl(`${API}Findings/${f.Id}/Dismiss`) }).then(() => {
+                card.remove();
+                refresh();
+            }, () => {
+                dismiss.disabled = false;
+                dismiss.textContent = 'Try again';
+            });
+        });
+        return card;
+    });
+    return h('div', null, tiles,
+        label ? h('p', { className: 'mrFaint' }, `Only ${label.Label}. `, h('a', { href: pageUrl({ tab: 'suspected' }) }, 'Show all kinds')) : null,
+        rows.length ? h('ul', { className: 'mrFindings' }, rows) : h('div', { className: 'mrPanel mrEmpty' }, h('p', null, 'None of this kind.')));
 }
 
 function noMatch(params, navigate) {
@@ -801,6 +878,12 @@ function settingsPage(settings) {
     const days = h('input', { className: 'mrInput mrDays', id: 'mrDays', type: 'text', inputmode: 'numeric', value: model.days, 'aria-describedby': 'mrDaysNote' });
     const daysNote = h('p', { className: 'mrBad', role: 'alert' });
     const reporting = h('input', { type: 'checkbox', id: 'mrReporting', checked: model.reportingEnabled });
+    const suspects = [
+        { field: 'SuspectFreezing', id: 'mrSuspectFreezing', label: 'Freezing', kind: 'freezing' },
+        { field: 'SuspectSlowTranscode', id: 'mrSuspectSlowTranscode', label: 'Transcoder too slow', kind: 'slow-transcode' },
+        { field: 'SuspectLowQuality', id: 'mrSuspectLowQuality', label: 'Low quality', kind: 'low-quality' },
+        { field: 'SuspectPlaybackError', id: 'mrSuspectPlaybackError', label: 'Playback error mid-play', kind: 'playback-error' }
+    ].map((s) => Object.assign(s, { input: h('input', { type: 'checkbox', id: s.id, checked: settings[s.field] !== false }) }));
     const hooks = [
         { field: 'discordWebhookUrl', id: 'mrDiscord', label: 'Discord webhook', value: settings.DiscordWebhookUrl, placeholder: 'https://discord.com/api/webhooks/…' },
         { field: 'webhookUrl', id: 'mrWebhook', label: 'Other webhook (JSON POST)', value: settings.WebhookUrl, placeholder: 'https://' }
@@ -920,6 +1003,10 @@ function settingsPage(settings) {
         saveNote.textContent = 'Saving…';
         const body = {
             ReportingEnabled: reporting.checked,
+            SuspectFreezing: suspects[0].input.checked,
+            SuspectSlowTranscode: suspects[1].input.checked,
+            SuspectLowQuality: suspects[2].input.checked,
+            SuspectPlaybackError: suspects[3].input.checked,
             Reasons: model.reasons.map((r) => ({ Code: r.code, Label: r.label, Retired: r.retired })),
             ReportRetentionDays: days.value,
             DiscordWebhookUrl: hooks[0].input.value,
@@ -930,6 +1017,9 @@ function settingsPage(settings) {
             model.reasons = saved.Reasons.map((r) => ({ code: r.Code, label: r.Label, retired: r.Retired, reports: r.Reports }));
             days.value = String(saved.ReportRetentionDays);
             reporting.checked = saved.ReportingEnabled;
+            suspects.forEach((sw) => {
+                sw.input.checked = saved[sw.field] !== false;
+            });
             hooks[0].input.value = saved.DiscordWebhookUrl;
             hooks[1].input.value = saved.WebhookUrl;
             showRefusal();
@@ -957,6 +1047,7 @@ function settingsPage(settings) {
     hooks.forEach((hook) => hook.input.addEventListener('input', edited));
     testButton.addEventListener('click', sendTest);
     reporting.addEventListener('change', edited);
+    suspects.forEach((sw) => sw.input.addEventListener('change', edited));
     renderReasons();
 
     return h('div', { className: 'mrSettings' },
@@ -979,6 +1070,11 @@ function settingsPage(settings) {
                 h('span', null, 'Let users report problems',
                     h('span', { className: 'mrFaint', style: 'display:block;margin-top:4px' },
                         'Off removes the Report button and My Reports from every app, and new reports are refused. Reports already filed stay here.')))),
+        h('section', { className: 'mrCard mrSuspectSwitches', 'aria-labelledby': 'mrSuspectHead' },
+            h('h2', { className: 'mrH3', id: 'mrSuspectHead' }, 'Suspected problems'),
+            h('p', { className: 'mrFaint' }, 'What the plugin watches for on its own, on every app. A kind switched off adds no new findings; the ones already kept stay until they expire.'),
+            suspects.map((sw) => h('label', { className: 'mrCheck', for: sw.id, style: 'margin-top:12px' }, sw.input,
+                h('span', null, sw.label, h('span', { className: 'mrFaint', style: 'display:block;margin-top:4px' }, KIND_MEANINGS[sw.kind]))))),
         h('section', { className: 'mrCard mrAlerts', 'aria-labelledby': 'mrAlertsHead' },
             h('h2', { className: 'mrH3', id: 'mrAlertsHead' }, 'Alerts'),
             h('p', { className: 'mrFaint' }, "Each new report is posted here within a minute; reports filed in the same minute come as one message. Every report is also in Jellyfin's activity log."),
@@ -1062,6 +1158,34 @@ export default function (view) {
                         : couldNotLoad(show));
                 }
             }));
+            return;
+        }
+
+        if (params.tab === 'suspected') {
+            root.appendChild(header(null));
+            root.appendChild(tabs(null, 'suspected'));
+            root.appendChild(skeleton());
+            const counts = () => call('GET', 'Summary', { markSeen: false }).then((summary) => {
+                const tab = root.querySelector('.mrSuspectedTab .mrCount');
+                if (tab && mine === generation) {
+                    tab.textContent = summary.Suspected || 0;
+                }
+            }, () => null);
+            Promise.all([call('GET', 'Findings', params.kind ? { kind: params.kind } : {}), call('GET', 'Summary', { markSeen: false })]).then(([list, summary]) => {
+                if (mine === generation) {
+                    root.textContent = '';
+                    root.appendChild(header(summary));
+                    root.appendChild(tabs(summary, 'suspected'));
+                    root.appendChild(suspectedPage(params, list, counts));
+                }
+            }, () => {
+                if (mine === generation) {
+                    root.textContent = '';
+                    root.appendChild(header(null));
+                    root.appendChild(tabs(null, 'suspected'));
+                    root.appendChild(couldNotLoad(show));
+                }
+            });
             return;
         }
 

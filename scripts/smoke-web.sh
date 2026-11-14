@@ -272,6 +272,10 @@ def dialog(page):
 
 def wait_dialog(page, open_=True):
     page.wait_for_function("open => (document.querySelector('.mediaReportsDialog') !== null) === open", arg=open_, timeout=WAIT_MS)
+    if open_:
+        # The first answer from a newly started server can take longer than a fixed pause.
+        page.wait_for_function("() => ![...document.querySelectorAll('.mediaReportsDialog .mediaReportsHint')].some(h => h.textContent === 'Loading…')",
+                               timeout=WAIT_MS)
     page.wait_for_timeout(300)
 
 

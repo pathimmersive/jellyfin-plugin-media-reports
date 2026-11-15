@@ -381,6 +381,9 @@ ok "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$issue" '{"status":"Du
 sleep 5
 ok "Alice Phone" "$alice_phone" GET /MediaReports/Report/Mine >"$work/results/mine-after.json"
 ok "Alice Phone" "$alice_phone" GET "/MediaReports/Report/Mine/$alice_report" >"$work/results/mine-detail.json"
+ok "Alice Phone" "$alice_phone" GET /MediaReports/Report/Mine >"$work/results/mine-fetched.json"
+[[ "$(req "Alice Phone" "$alice_phone" POST "/MediaReports/Report/Mine/$alice_report/Seen")" == 204 ]] || fail "Seen did not answer 204"
+expect 404 report-not-found "Bob Laptop" "$bob" POST "/MediaReports/Report/Mine/$alice_report/Seen"
 ok "Alice Phone" "$alice_phone" GET /MediaReports/Report/Mine >"$work/results/mine-read.json"
 ok "Bob Laptop" "$bob" GET /MediaReports/Report/Mine >"$work/results/bob-mine.json"
 py - "$work/results" <<'PY' || fail "My Reports or the notice is wrong"
@@ -388,7 +391,7 @@ import json, os, sys
 r = sys.argv[1]
 load = lambda n: json.load(open(os.path.join(r, n)))
 title = load("context.json")["Name"]
-before, after, detail, read, bob = (load(n) for n in ("mine-before.json", "mine-after.json", "mine-detail.json", "mine-read.json", "bob-mine.json"))
+before, after, detail, fetched, read, bob = (load(n) for n in ("mine-before.json", "mine-after.json", "mine-detail.json", "mine-fetched.json", "mine-read.json", "bob-mine.json"))
 assert [x["ReasonLabel"] for x in before["Reports"]] == ["Audio problem", "Stutter or jitter"] and before["Unread"] == 0, before
 assert [x["Status"] for x in before["Reports"]] == ["new", "new"], before
 assert len(after["Reports"]) == 1 and after["Unread"] == 1 and after["Reports"][0]["Unread"], after
@@ -397,6 +400,7 @@ assert detail["Status"] == "duplicate", detail
 assert after["Reports"][0]["ExpiresLabel"] == "Expires in 12 months" and after["Reports"][0]["CanHide"] is True, after
 assert [h["Label"] for h in detail["History"]] == ["Reported", "Being looked at", "Fixed", "Duplicate"], detail["History"]
 assert detail["Note"] == "keeps jumping back" and detail.get("Device") == "Living Room TV" and detail["CanWithdraw"] is False, detail
+assert fetched["Unread"] == 1 and fetched["Reports"][0]["Unread"], fetched
 assert read["Unread"] == 0 and not read["Reports"][0]["Unread"], read
 assert bob["Unread"] == 1 and bob["Reports"][0]["StatusLabel"] == "Duplicate", bob
 notices = load("notices.json")

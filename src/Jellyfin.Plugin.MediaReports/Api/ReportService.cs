@@ -283,6 +283,23 @@ public sealed class ReportService
     }
 
     /// <summary>
+    /// Records that the caller has seen their report's current status.
+    /// </summary>
+    /// <param name="userId">The caller.</param>
+    /// <param name="reportId">The report.</param>
+    /// <returns>Success, or a refusal.</returns>
+    public ServiceResult<bool> MarkSeen(Guid userId, long reportId)
+    {
+        if (!_store.GetReporterReports(userId).Any(r => r.Report.Id == reportId))
+        {
+            return ReportNotFound<bool>();
+        }
+
+        _store.MarkReporterSeen(reportId);
+        return ServiceResult<bool>.Success(true);
+    }
+
+    /// <summary>
     /// Removes one of the caller's closed reports from their list. Works while reporting is off.
     /// </summary>
     /// <param name="userId">The caller.</param>
@@ -304,7 +321,7 @@ public sealed class ReportService
         => ServiceResult<HiddenReports>.Success(new HiddenReports { Hidden = _store.HideClosedFromReporter(userId) });
 
     /// <summary>
-    /// Opens one of the caller's reports and records that they have seen its current status.
+    /// Opens one of the caller's reports. Reading it changes nothing; <see cref="MarkSeen"/> clears the unread mark.
     /// </summary>
     /// <param name="userId">The caller.</param>
     /// <param name="reportId">The report.</param>
@@ -323,7 +340,6 @@ public sealed class ReportService
             .Select(e => (e.At, Status: ReporterText.StatusChangedTo(e.Detail)))
             .Where(e => e.Status is not null)
             .Select(e => new MyReportStep(e.At, ReporterText.StatusLabel(e.Status!.Value)));
-        _store.MarkReporterSeen(report.Id);
         return ServiceResult<MyReportDetail>.Success(new MyReportDetail
         {
             Id = report.Id,

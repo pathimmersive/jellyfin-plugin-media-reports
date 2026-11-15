@@ -238,6 +238,22 @@ public sealed class ReportServiceTests : IDisposable
     }
 
     [Fact]
+    public void OpeningAReport_LeavesItUnread_UntilSeenIsCalled()
+    {
+        var filed = Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)));
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        _store.SetStatus(filed.IssueId, IssueStatus.Fixed, null);
+        Assert.Equal(1, Ok(_service.Mine(_alice.Id)).Unread);
+
+        Ok(_service.MineDetail(_alice.Id, filed.Id));
+        Assert.Equal(1, Ok(_service.Mine(_alice.Id)).Unread);
+
+        Assert.Equal(Outcome.Ok, _service.MarkSeen(_alice.Id, filed.Id).Outcome);
+        Assert.Equal(0, Ok(_service.Mine(_alice.Id)).Unread);
+        AssertRefused(_service.MarkSeen(_bob.Id, filed.Id), Outcome.NotFound, "report-not-found");
+    }
+
+    [Fact]
     public void File_InParallel_StoresOneReportPerItemAndReason()
     {
         var results = FileInParallel(20, _ => new FileReportRequest(MovieId, "stutter", null));
@@ -421,7 +437,7 @@ public sealed class ReportServiceTests : IDisposable
     }
 
     [Fact]
-    public void Mine_MarksAReportUnreadWhenItsStatusChanges_AndReadingItClearsTheMark()
+    public void Mine_MarksAReportUnreadWhenItsStatusChanges_AndSeenClearsTheMark()
     {
         var filed = Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)));
         Assert.Equal(0, Ok(_service.Mine(_alice.Id)).Unread);
@@ -432,7 +448,7 @@ public sealed class ReportServiceTests : IDisposable
         Assert.Equal((1, true, "Fixed"), (mine.Unread, mine.Reports[0].Unread, mine.Reports[0].StatusLabel));
 
         _clock.Advance(TimeSpan.FromMinutes(1));
-        Ok(_service.MineDetail(_alice.Id, filed.Id));
+        Assert.Equal(Outcome.Ok, _service.MarkSeen(_alice.Id, filed.Id).Outcome);
         mine = Ok(_service.Mine(_alice.Id));
         Assert.Equal((0, false), (mine.Unread, mine.Reports[0].Unread));
     }

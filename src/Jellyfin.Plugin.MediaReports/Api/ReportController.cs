@@ -103,7 +103,7 @@ public sealed class ReportController : ControllerBase
     }
 
     /// <summary>
-    /// Opens one of the caller's reports and marks its status as seen.
+    /// Opens one of the caller's reports. Reading it changes nothing.
     /// </summary>
     /// <param name="id">The report.</param>
     /// <returns>The report.</returns>
@@ -148,6 +148,26 @@ public sealed class ReportController : ControllerBase
     /// </summary>
     /// <param name="id">The report.</param>
     /// <returns>No content.</returns>
+    [HttpPost("Mine/{id}/Seen")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult> Seen([FromRoute] long id)
+    {
+        var (userId, _) = await Caller().ConfigureAwait(false);
+        if (userId is null)
+        {
+            return Forbid();
+        }
+
+        var answer = Answer(() => _service.MarkSeen(userId.Value, id), StatusCodes.Status204NoContent);
+        return answer.StatusCode == StatusCodes.Status204NoContent ? NoContent() : answer;
+    }
+
+    /// <summary>
+    /// Removes one of the caller's closed reports from their list.
+    /// </summary>
+    /// <param name="id">The report.</param>
+    /// <returns>No content, or a refusal.</returns>
     [HttpPost("Mine/{id}/Hide")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

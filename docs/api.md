@@ -162,7 +162,8 @@ is open or when nothing is deleted. Works while reporting is off.
 
 ### `GET /MediaReports/Report/Mine/{id}`
 
-*User.* Opens one of the caller's reports and marks its current status as seen.
+*User.* Opens one of the caller's reports. Reading it changes nothing; call `Seen` when the user
+sees it.
 
 ```json
 { "Id": 31, "ItemId": "6f1c…", "Title": "Test Series S02E05", "ReasonLabel": "Stutter or jitter",
@@ -170,6 +171,13 @@ is open or when nothing is deleted. Works while reporting is off.
   "Status": "fixed", "StatusLabel": "Fixed", "CanWithdraw": false,
   "History": [ { "At": "…", "Label": "Reported" }, { "At": "…", "Label": "Fixed" } ] }
 ```
+
+Refusal: 404 `report-not-found`, also for another user's report.
+
+### `POST /MediaReports/Report/Mine/{id}/Seen`
+
+*User.* Records that the caller has seen the report's current status, so it is no longer unread.
+Answers 204. Call it when the report is shown to the user, not when it is fetched ahead.
 
 Refusal: 404 `report-not-found`, also for another user's report.
 

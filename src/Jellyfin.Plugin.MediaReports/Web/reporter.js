@@ -1099,8 +1099,9 @@
             if (open !== state) {
                 return;
             }
-            // Opening it marked it read on the server.
+            // Showing it is what marks it read.
             if (report.Unread) {
+                call('POST', 'MediaReports/Report/Mine/' + report.Id + '/Seen');
                 report.Unread = false;
                 state.mine.Unread = Math.max(0, (state.mine.Unread || 0) - 1);
             }

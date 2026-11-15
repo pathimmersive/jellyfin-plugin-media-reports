@@ -295,7 +295,7 @@ public sealed class ReportServiceTests : IDisposable
     }
 
     [Fact]
-    public void ReporterEndpoints_GiveReplacedVerifyAsBeingLookedAt_NeverTheStorageName()
+    public void ReporterEndpoints_GiveReplacedVerifyAsInvestigating_NeverTheStorageName()
     {
         var filed = Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)));
         _store.SetStatus(filed.IssueId, IssueStatus.ReplacedVerify, null);
@@ -304,7 +304,7 @@ public sealed class ReportServiceTests : IDisposable
         var detail = Ok(_service.MineDetail(_alice.Id, filed.Id));
         var open = Ok(_service.GetContext(_alice.Id, null, MovieId)).OpenReports[0];
 
-        Assert.Equal(("being-looked-at", "being-looked-at", "being-looked-at"), (row.Status, detail.Status, open.Status));
+        Assert.Equal(("investigating", "investigating", "investigating"), (row.Status, detail.Status, open.Status));
         Assert.Equal("Being looked at", row.StatusLabel);
     }
 
@@ -315,7 +315,7 @@ public sealed class ReportServiceTests : IDisposable
         {
             [IssueStatus.New] = "new",
             [IssueStatus.Investigating] = "investigating",
-            [IssueStatus.ReplacedVerify] = "being-looked-at",
+            [IssueStatus.ReplacedVerify] = "investigating",
             [IssueStatus.Fixed] = "fixed",
             [IssueStatus.WontFix] = "wont-fix",
             [IssueStatus.Duplicate] = "duplicate",

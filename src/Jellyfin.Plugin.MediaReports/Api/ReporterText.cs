@@ -26,16 +26,15 @@ public static class ReporterText
 
     /// <summary>
     /// Gets the status code a reporter's client sees, from the documented set. The plugin's own
-    /// Replaced – verify reads <c>being-looked-at</c>, so the storage status never reaches a reporter.
+    /// Replaced – verify reads <c>investigating</c>, so the storage status never reaches a reporter.
     /// </summary>
     /// <param name="status">The status.</param>
     /// <returns>The code.</returns>
     public static string StatusCode(IssueStatus status) => status switch
     {
         IssueStatus.New => "new",
-        IssueStatus.Investigating => "investigating",
-        IssueStatus.ReplacedVerify => "being-looked-at",
-        IssueStatus.Fixed => "fixed",
+        IssueStatus.Investigating or IssueStatus.ReplacedVerify => "investigating",
+                IssueStatus.Fixed => "fixed",
         IssueStatus.WontFix => "wont-fix",
         IssueStatus.Duplicate => "duplicate",
         IssueStatus.CantReproduce => "cant-reproduce",

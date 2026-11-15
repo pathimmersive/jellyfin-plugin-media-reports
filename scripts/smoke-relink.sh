@@ -280,11 +280,11 @@ echo "== alice's My Reports"
 ok "Alice Phone" "$alice" GET /MediaReports/Report/Mine | py -c '
 import json, sys
 d = json.load(sys.stdin)
-assert not [r for r in d["Reports"] if r["Status"] == "ReplacedVerify"], d["Reports"]
-moved = [r for r in d["Reports"] if r["Status"] == "being-looked-at"]
+assert not [r for r in d["Reports"] if r["Status"] in ("ReplacedVerify", "being-looked-at")], d["Reports"]
+moved = [r for r in d["Reports"] if r["Status"] == "investigating"]
 assert moved, d["Reports"]
 assert all(r["StatusLabel"] == "Being looked at" for r in moved), moved
-print("My Reports: %d moved or changed reports are being-looked-at, read Being looked at" % len(moved))' || fail "My Reports is wrong"
+print("My Reports: %d moved or changed reports are investigating, read Being looked at" % len(moved))' || fail "My Reports is wrong"
 
 if docker logs "$container" 2>&1 | grep -q "could not follow a library change"; then
   docker logs "$container" 2>&1 | grep -A5 "could not follow a library change" >&2

@@ -59,14 +59,13 @@ for people beside it:
 |---|---|---|
 | `new` | New | no |
 | `investigating` | Being looked at | no |
-| `being-looked-at` | Being looked at | no |
 | `fixed` | Fixed | yes |
 | `wont-fix` | Won't fix | yes |
 | `duplicate` | Duplicate | yes |
 | `cant-reproduce` | Can't reproduce | yes |
 
-`being-looked-at` means the plugin saw the title's file change and the admin still has to check
-the fix. Admin routes use the plugin's own names instead (`New`, `Investigating`,
+`investigating` also covers a report whose title's file changed, while the admin checks the
+fix. Admin routes use the plugin's own names instead (`New`, `Investigating`,
 `ReplacedVerify`, `Fixed`, `WontFix`, `Duplicate`, `CantReproduce`).
 
 ## Plugin

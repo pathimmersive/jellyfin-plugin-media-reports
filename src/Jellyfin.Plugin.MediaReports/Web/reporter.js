@@ -388,7 +388,7 @@
         if (status === 'new') {
             return "It's waiting to be looked at.";
         }
-        if (status === 'investigating' || status === 'being-looked-at') {
+        if (status === 'investigating') {
             return "It's being looked at.";
         }
         return '';
@@ -729,7 +729,7 @@
     // ---- My Reports -----------------------------------------------------------------------
 
     var MINE_LABEL = 'My Reports';
-    var PILLS = { 'new': 'mr-new', investigating: 'mr-looking', 'being-looked-at': 'mr-looking', fixed: 'mr-fixed' };
+    var PILLS = { 'new': 'mr-new', investigating: 'mr-looking', fixed: 'mr-fixed' };
     var DOT = 'mediaReportsDot';
     var USER_BUTTONS = 'button[aria-controls=app-user-menu], .headerUserButton';
     var SETTINGS_ITEM = 'a[role=menuitem][href="#/mypreferencesmenu"]';

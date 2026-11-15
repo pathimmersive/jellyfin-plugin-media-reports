@@ -146,7 +146,7 @@ public sealed record FiledReportView
     /// <summary>Gets the reason's code.</summary>
     public string ReasonCode { get; init; } = string.Empty;
 
-    /// <summary>Gets the status code from the reporter set (new, investigating, being-looked-at, fixed, wont-fix, duplicate, cant-reproduce).</summary>
+    /// <summary>Gets the status code from the reporter set (new, investigating, fixed, wont-fix, duplicate, cant-reproduce).</summary>
     public string Status { get; init; } = string.Empty;
 
     /// <summary>Gets when it was filed.</summary>
@@ -188,7 +188,7 @@ public sealed record MyReportRow
     /// <summary>Gets when it was filed.</summary>
     public DateTimeOffset CreatedAt { get; init; }
 
-    /// <summary>Gets the status code from the reporter set (new, investigating, being-looked-at, fixed, wont-fix, duplicate, cant-reproduce).</summary>
+    /// <summary>Gets the status code from the reporter set (new, investigating, fixed, wont-fix, duplicate, cant-reproduce).</summary>
     public string Status { get; init; } = string.Empty;
 
     /// <summary>Gets the status as the reporter sees it.</summary>
@@ -245,7 +245,7 @@ public sealed record MyReportDetail
     /// <summary>Gets when it was filed.</summary>
     public DateTimeOffset CreatedAt { get; init; }
 
-    /// <summary>Gets the status code from the reporter set (new, investigating, being-looked-at, fixed, wont-fix, duplicate, cant-reproduce).</summary>
+    /// <summary>Gets the status code from the reporter set (new, investigating, fixed, wont-fix, duplicate, cant-reproduce).</summary>
     public string Status { get; init; } = string.Empty;
 
     /// <summary>Gets the status as the reporter sees it.</summary>

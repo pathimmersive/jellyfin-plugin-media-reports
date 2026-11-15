@@ -210,11 +210,57 @@ Refusals: 404 `report-not-found`; 409 `not-closed`.
 
 ### `GET /MediaReports/Playbacks`
 
-*User.* The caller's own live and recent playbacks, newest first, as the plugin saw them. Each
-entry has the session, `State`, `LastSeen`, client, device, item, play method, position, the
-audio and subtitle stream in use, the transcode (codecs, bitrate, size, hardware acceleration,
-`TranscodeReasons`), and the source file's streams and bitrate. No other user's playbacks are
-returned.
+*User.* The caller's own live and recent playbacks, newest first, as the plugin saw them: a list
+of the objects below. No other user's playbacks are returned, and no session, device, media
+source or user id is.
+
+Fields of `Playback`:
+
+| Field | Meaning |
+|---|---|
+| `State` | `Playing`, `Stopped` or `Ended`. |
+| `LastSeen` | When the server last saw it. |
+| `Client` | The app's name, such as `Jellyfin Roku`. |
+| `ClientVersion` | The app's version. |
+| `DeviceName` | The device's name. |
+| `ItemId` | The item played. |
+| `ItemName` | The item's name. |
+| `PlayMethod` | `DirectPlay`, `DirectStream` or `Transcode`. |
+| `PositionTicks` | The position, in ticks of 100 ns. |
+| `AudioStreamIndex` | The audio stream in use. |
+| `SubtitleStreamIndex` | The subtitle stream in use. |
+| `Transcoding` | The transcode, or null. |
+| `SourceStreams` | The source file's streams. |
+| `SourceBitrate` | The source file's bitrate. |
+
+Fields of `Transcoding`:
+
+| Field | Meaning |
+|---|---|
+| `VideoCodec` | The output video codec. |
+| `AudioCodec` | The output audio codec. |
+| `Container` | The output container. |
+| `IsVideoDirect` | Whether video is copied. |
+| `IsAudioDirect` | Whether audio is copied. |
+| `Bitrate` | The output bitrate. |
+| `Width` | The output width. |
+| `Height` | The output height. |
+| `HardwareAccelerationType` | Jellyfin's name for the hardware acceleration. |
+| `TranscodeReasons` | Why the server transcoded, with Jellyfin's own names. |
+
+Fields of `SourceStreams`:
+
+| Field | Meaning |
+|---|---|
+| `Index` | The stream index. |
+| `Type` | `Video`, `Audio` or `Subtitle`. |
+| `Codec` | The codec. |
+| `Language` | The language. |
+| `Bitrate` | The bitrate. |
+| `Width` | The width. |
+| `Height` | The height. |
+| `Channels` | The channel count. |
+| `FrameRate` | The frame rate, for a video stream. |
 
 ### `POST /MediaReports/Client/Loaded`
 

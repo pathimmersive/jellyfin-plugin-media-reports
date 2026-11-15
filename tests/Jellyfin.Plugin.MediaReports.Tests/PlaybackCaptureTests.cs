@@ -189,8 +189,8 @@ public class PlaybackCaptureTests
     [Fact]
     public async Task Endpoint_ReturnsOnlyTheCallersPlaybacks()
     {
-        Progress(Session("alice-tv", Alice, "TV", PlayMethod.DirectPlay));
-        Progress(Session("bob-tv", Bob, "TV", PlayMethod.DirectPlay));
+        Progress(Session("alice-tv", Alice, "Alice TV", PlayMethod.DirectPlay));
+        Progress(Session("bob-tv", Bob, "Bob TV", PlayMethod.DirectPlay));
         var authorization = new Mock<IAuthorizationContext>();
         authorization.Setup(a => a.GetAuthorizationInfo(It.IsAny<HttpContext>()))
             .ReturnsAsync(new AuthorizationInfo { User = new Jellyfin.Database.Implementations.Entities.User("bob", "provider", "reset") { Id = Bob } });
@@ -202,8 +202,8 @@ public class PlaybackCaptureTests
         var result = await controller.GetPlaybacks();
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
-        var playbacks = Assert.IsAssignableFrom<IReadOnlyList<PlaybackEntry>>(ok.Value);
-        Assert.Equal(["bob-tv"], playbacks.Select(p => p.SessionId));
+        var playbacks = Assert.IsAssignableFrom<IReadOnlyList<PlaybackView>>(ok.Value);
+        Assert.Equal(["Bob TV"], playbacks.Select(p => p.DeviceName));
     }
 
     [Fact]

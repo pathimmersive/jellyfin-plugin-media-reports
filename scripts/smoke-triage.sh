@@ -345,7 +345,7 @@ with sync_playwright() as p:
     gone_issue = report(bob, "Bob Laptop", GONE, "audio")
     series_issue = report(carol, "Carol Phone", series, "other", "Two seasons have the same poster.")
     closed_issue = report(alice, "Living Room TV", FILLERS[0], "poor-quality")
-    admin_patch(closed_issue, {"status": "Fixed"})
+    admin_patch(closed_issue, {"status": "fixed"})
 
     # ---- The menu count and the Reports tab ----------------------------------------
     # A fresh load of the Dashboard, as when the admin opens it.
@@ -382,10 +382,10 @@ with sync_playwright() as p:
     # Season row: expand, Set status for all.
     page.locator(V + "tr.mrSeasonRow button.mrTitleLink").click()
     check(page.locator(V + "tr.mrChild[data-issue]").count() == 3, "the season row expands to its three episode issues")
-    page.locator(V + "tr.mrSetAll select").select_option("Investigating")
+    page.locator(V + "tr.mrSetAll select").select_option("investigating")
     page.wait_for_function("() => [...document.querySelectorAll('.page:not(.hide) tr.mrSeasonRow .mrPill')].some(p => p.textContent === 'Investigating')", timeout=WAIT_MS)
     statuses = [ok("GET", "/MediaReports/Admin/Issues/%s" % i, ADMIN) for i in season_issues]
-    check(all(s["Status"] == "Investigating" and s["History"][-1]["Kind"] == "status changed" for s in statuses),
+    check(all(s["Status"] == "investigating" and s["History"][-1]["Kind"] == "status changed" for s in statuses),
           "Set status for all makes every episode Investigating, each with its own history line")
 
     # Views.
@@ -470,14 +470,14 @@ with sync_playwright() as p:
     page.locator(V + "button", has_text="Save notes").click()
     page.wait_for_function("() => [...document.querySelectorAll('.page:not(.hide) .mrHistory li')].some(l => l.textContent.startsWith('Notes changed by admin'))", timeout=WAIT_MS)
     check(page.input_value(V + ".mrNotes") == "Re-encode planned.", "notes are saved with a history line")
-    page.select_option(V + ".mrStatusSelect", "Fixed")
+    page.select_option(V + ".mrStatusSelect", "fixed")
     page.wait_for_function("() => [...document.querySelectorAll('.page:not(.hide) .mrHistory li')].some(l => l.textContent.startsWith('New → Fixed, by admin'))", timeout=WAIT_MS)
     check(True, "setting Fixed adds the status change to History")
     newer = report(alice, "Living Room TV", MOVIE, "stutter")
-    page.select_option(V + ".mrStatusSelect", "New")
+    page.select_option(V + ".mrStatusSelect", "new")
     page.wait_for_function("() => /newer open issue/.test((document.querySelector('.page:not(.hide) .mrMessage') || {}).textContent || '')", timeout=WAIT_MS)
     link = page.locator(V + ".mrMessage a").get_attribute("href")
-    check(link and ("issue=%s" % newer) in link and page.input_value(V + ".mrStatusSelect") == "Fixed",
+    check(link and ("issue=%s" % newer) in link and page.input_value(V + ".mrStatusSelect") == "fixed",
           "reopening while a newer issue is open is refused, linking to it")
     page.go_back()
     page.wait_for_function("() => location.hash.indexOf('issue=') === -1", timeout=WAIT_MS)

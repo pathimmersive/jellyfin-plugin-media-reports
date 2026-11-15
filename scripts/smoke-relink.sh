@@ -210,8 +210,8 @@ f = json.load(open(os.path.join(r, "alpha-fixed.json")))
 for d in (o, f):
     assert d["ItemId"].replace("-", "") == new, (d["ItemId"], new)
     assert any(h["Kind"] == "relinked" and (h.get("Detail") or "").startswith("Moved to the replaced file") for h in d["History"]), d["History"]
-assert o["Status"] == "ReplacedVerify", o["Status"]
-assert f["Status"] == "Fixed", f["Status"]
+assert o["Status"] == "replaced-verify", o["Status"]
+assert f["Status"] == "fixed", f["Status"]
 print("renamed movie: open issue Replaced - verify on the new item, Fixed issue moved and still Fixed")
 PY
 
@@ -219,7 +219,7 @@ echo "== an episode overwritten at the same path"
 cp "$work/clips/clip-3.mkv" "$show/Show (2026) S01E01.mkv"
 scan
 wait_for "the episode's issue did not become Replaced - verify after its file changed" \
-  issue_is "$e01_issue" "d['Status'] == 'ReplacedVerify' and any(h.get('Detail') == 'The file changed' for h in d['History'])"
+  issue_is "$e01_issue" "d['Status'] == 'replaced-verify' and any(h.get('Detail') == 'The file changed' for h in d['History'])"
 echo "episode: Replaced - verify, The file changed"
 set_status "$e01_issue" Investigating
 sleep 2
@@ -227,7 +227,7 @@ cp "$work/clips/clip-2.mkv" "$show/Show (2026) S01E01.mkv"
 touch "$show/Show (2026) S01E01.mkv"
 scan
 wait_for "the episode's issue did not become Replaced - verify again after a second change" \
-  issue_is "$e01_issue" "d['Status'] == 'ReplacedVerify' and sum(h.get('Detail') == 'The file changed' for h in d['History']) == 2"
+  issue_is "$e01_issue" "d['Status'] == 'replaced-verify' and sum(h.get('Detail') == 'The file changed' for h in d['History']) == 2"
 echo "episode: Replaced - verify again after the admin moved it on and the file changed again"
 
 echo "== the task is listed with a daily trigger"
@@ -260,7 +260,7 @@ scan
 gamma_replaced() { [[ -z "$(item_by_path Movie "Gamma (2026)")" && -n "$(item_by_path Movie "Gamma Copy A")" && -n "$(item_by_path Movie "Gamma Copy B")" ]]; }
 wait_for "the two Gamma copies did not replace the original" gamma_replaced
 run_task
-issue_is "$gamma_issue" "d['ItemId'].replace('-', '') == '$gamma'.replace('-', '') and d['Status'] == 'New' and d['File']['InLibrary'] is False" \
+issue_is "$gamma_issue" "d['ItemId'].replace('-', '') == '$gamma'.replace('-', '') and d['Status'] == 'new' and d['File']['InLibrary'] is False" \
   || fail "the issue on a movie with two matches moved or does not read as no longer in the library: $(issue "$gamma_issue")"
 echo "two matches: the issue stayed on the removed movie, no longer in the library"
 
@@ -273,7 +273,7 @@ beta_new_present() { [[ -n "$(item_by_path Movie "Beta Final")" ]]; }
 wait_for "the renamed Beta did not appear after the restart" beta_new_present
 run_task
 wait_for "the issue on the movie renamed while the server was stopped did not move" \
-  issue_is "$beta_issue" "d['ItemId'].replace('-', '') != '$beta'.replace('-', '') and d['Status'] == 'ReplacedVerify'"
+  issue_is "$beta_issue" "d['ItemId'].replace('-', '') != '$beta'.replace('-', '') and d['Status'] == 'replaced-verify'"
 echo "renamed while stopped: moved after the start, a scan and Re-link media reports"
 
 echo "== alice's My Reports"

@@ -189,10 +189,10 @@ for call in "GET /MediaReports/Admin/Summary" "GET /MediaReports/Admin/Issues" "
   "POST /MediaReports/Admin/Settings/TestAlert" "GET /MediaReports/Metrics"; do
   set -- $call
   expect 401 unauthorized "" "" "$1" "$2" '{}'
-  expect 403 forbidden "Bob Laptop" "$bob" "$1" "$2" '{"status":"Fixed","issueIds":[1]}'
+  expect 403 forbidden "Bob Laptop" "$bob" "$1" "$2" '{"status":"fixed","issueIds":[1]}'
 done
 echo "non-admin refused on every endpoint, each with the error body"
-expect 400 bad-request "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$movie_issue" '{"status": ["Fixed"]}'
+expect 400 bad-request "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$movie_issue" '{"status": ["fixed"]}'
 expect 400 bad-request "admin box" "$admin" GET /MediaReports/Admin/Issues/not-a-number
 expect 404 not-found "admin box" "$admin" GET /MediaReports/Admin/Nothing
 expect 405 method-not-allowed "admin box" "$admin" DELETE /MediaReports/Admin/Summary
@@ -212,7 +212,7 @@ check "$work/results/issues.json" "
 rows = d['Rows']
 assert d['Total'] == 4, d['Total']
 season = [r for r in rows if r['Kind'] == 'season']
-assert len(season) == 1 and season[0]['EpisodeCount'] == 3 and len(season[0]['Children']) == 3 and season[0]['Status'] == 'New', season
+assert len(season) == 1 and season[0]['EpisodeCount'] == 3 and len(season[0]['Children']) == 3 and season[0]['Status'] == 'new', season
 movie = next(r for r in rows if r.get('IssueId') == $movie_issue)
 assert (movie['Reports'], movie['People'], movie['ReasonLabel']) == (2, 2, 'Stutter or jitter'), movie
 assert any(r.get('IssueId') == $lone_issue for r in rows), 'the lone episode is not its own row'
@@ -242,30 +242,31 @@ assert d['ServerId'], d
 echo "issue: live file with streams, two reports newest first, history with names"
 
 echo "== status rules and notes"
-expect 400 status-not-allowed "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$movie_issue" '{"status":"ReplacedVerify"}'
+expect 400 status-not-allowed "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$movie_issue" '{"status":"replaced-verify"}'
+expect 400 status-not-allowed "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$movie_issue" '{"status":"WontFix"}'
 expect 400 status-not-allowed "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$movie_issue" '{"status":"Bogus"}'
 long="$(py -c 'print("x" * 10001)')"
 expect 400 notes-too-long "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$movie_issue" "{\"notes\":\"$long\"}"
-ok "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$movie_issue" '{"status":"Fixed","notes":"Re-encoded the file."}' >"$work/results/fixed.json"
+ok "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$movie_issue" '{"status":"fixed","notes":"Re-encoded the file."}' >"$work/results/fixed.json"
 check "$work/results/fixed.json" "
-assert d['Status'] == 'Fixed' and d.get('ClosedAt') and d.get('Notes') == 'Re-encoded the file.', d
+assert d['Status'] == 'fixed' and d.get('ClosedAt') and d.get('Notes') == 'Re-encoded the file.', d
 kinds = [(e['Kind'], e.get('ActorName')) for e in d['History']]
 assert ('status changed', 'admin') in kinds and ('note added', 'admin') in kinds, kinds
 " "closing the issue is wrong"
 newer="$(file "Living Room TV" "$alice" "$movie" stutter)"
 [[ "$newer" != "$movie_issue" ]] || fail "a report after Fixed joined the closed issue"
-expect 409 newer-open-issue "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$movie_issue" '{"status":"New"}'
+expect 409 newer-open-issue "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$movie_issue" '{"status":"new"}'
 check "$work/results/last.json" "assert str(d.get('IssueId')) == '$newer', d" "the refusal does not name the newer issue"
 echo "Replaced – verify and unknown refused, long notes refused, Fixed with notes, reopen refused naming issue $newer"
 
 echo "== Set status for all"
 ids="$(IFS=,; echo "${episode_issues[*]}")"
-expect 409 newer-open-issue "admin box" "$admin" POST /MediaReports/Admin/Issues/Status "{\"issueIds\":[$ids,$movie_issue],\"status\":\"New\"}"
+expect 409 newer-open-issue "admin box" "$admin" POST /MediaReports/Admin/Issues/Status "{\"issueIds\":[$ids,$movie_issue],\"status\":\"new\"}"
 ok "admin box" "$admin" GET "/MediaReports/Admin/Issues/${episode_issues[0]}" | json "d['Status']" | grep -x New >/dev/null || fail "a refused Set status for all changed an issue"
-ok "admin box" "$admin" POST /MediaReports/Admin/Issues/Status "{\"issueIds\":[$ids],\"status\":\"Investigating\"}" >/dev/null
+ok "admin box" "$admin" POST /MediaReports/Admin/Issues/Status "{\"issueIds\":[$ids],\"status\":\"investigating\"}" >/dev/null
 for i in "${episode_issues[@]}"; do
   ok "admin box" "$admin" GET "/MediaReports/Admin/Issues/$i" >"$work/results/episode.json"
-  check "$work/results/episode.json" "assert d['Status'] == 'Investigating' and d['History'][-1]['Kind'] == 'status changed', d['History']" "Set status for all missed issue $i"
+  check "$work/results/episode.json" "assert d['Status'] == 'investigating' and d['History'][-1]['Kind'] == 'status changed', d['History']" "Set status for all missed issue $i"
 done
 echo "all or nothing: refused with one bad id, then all three Investigating with their own history line"
 

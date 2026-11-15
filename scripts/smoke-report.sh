@@ -366,18 +366,18 @@ expect 404 report-not-found "Bob Laptop" "$bob" DELETE "/MediaReports/Report/Min
 expect 404 report-not-found "Bob Laptop" "$bob" DELETE "/MediaReports/Report/Mine/$audio_report"
 
 echo "== withdraw while New, refused once it is being looked at"
-ok "admin box" "$admin" POST /MediaReports/Admin/Issues/Status "{\"issueIds\":[$issue],\"status\":\"Investigating\"}" >/dev/null
+ok "admin box" "$admin" POST /MediaReports/Admin/Issues/Status "{\"issueIds\":[$issue],\"status\":\"investigating\"}" >/dev/null
 expect 409 not-new "Alice Phone" "$alice_phone" DELETE "/MediaReports/Report/Mine/$alice_report"
 expect 204 "" "Alice Phone" "$alice_phone" DELETE "/MediaReports/Report/Mine/$audio_report"
 
 echo "== the admin closes the issue; the notice reaches alice's phone"
-ok "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$issue" '{"status":"Fixed","notes":"Secret admin note: re-encoded."}' >/dev/null
+ok "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$issue" '{"status":"fixed","notes":"Secret admin note: re-encoded."}' >/dev/null
 deadline=$((SECONDS + 30))
 until [[ -f "$work/results/notices.json" ]]; do
   (( SECONDS < deadline )) || fail "no DisplayMessage arrived on alice's websocket"
   sleep 1
 done
-ok "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$issue" '{"status":"Duplicate"}' >/dev/null
+ok "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$issue" '{"status":"duplicate"}' >/dev/null
 sleep 5
 ok "Alice Phone" "$alice_phone" GET /MediaReports/Report/Mine >"$work/results/mine-after.json"
 ok "Alice Phone" "$alice_phone" GET "/MediaReports/Report/Mine/$alice_report" >"$work/results/mine-detail.json"
@@ -432,9 +432,9 @@ ok "Alice Phone" "$alice_phone" GET /MediaReports/Report/Mine >"$work/results/mi
 ok "Bob Laptop" "$bob" GET /MediaReports/Report/Mine >"$work/results/bob-after-hide.json"
 ok "admin box" "$admin" GET "/MediaReports/Admin/Issues/$issue" >"$work/results/issue-after-hide.json"
 sleep 1
-ok "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$issue" '{"status":"Investigating"}' >/dev/null
+ok "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$issue" '{"status":"investigating"}' >/dev/null
 ok "Alice Phone" "$alice_phone" GET /MediaReports/Report/Mine >"$work/results/mine-reopened.json"
-ok "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$issue" '{"status":"Fixed"}' >/dev/null
+ok "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$issue" '{"status":"fixed"}' >/dev/null
 ok "Alice Phone" "$alice_phone" POST /MediaReports/Report/Mine/HideClosed >"$work/results/hide-closed.json"
 ok "Alice Phone" "$alice_phone" GET /MediaReports/Report/Mine >"$work/results/mine-cleared.json"
 py - "$work/results" "$alice_report" "$open_report" <<'PY' || fail "removing reports from My Reports is wrong"
@@ -451,7 +451,7 @@ assert [x["Id"] for x in hidden["Reports"]] == [open_id] and hidden["Unread"] ==
 bob = load("bob-after-hide.json")
 assert len(bob["Reports"]) == 1 and bob["Reports"][0]["StatusLabel"] == "Duplicate", bob
 issue = load("issue-after-hide.json")
-assert issue["Status"] == "Duplicate" and len(issue["Reports"]) == 2, issue
+assert issue["Status"] == "duplicate" and len(issue["Reports"]) == 2, issue
 reopened = load("mine-reopened.json")
 back = row(reopened, closed_id)
 assert back and back["Unread"] and back["StatusLabel"] == "Being looked at" and reopened["Unread"] == 1, reopened

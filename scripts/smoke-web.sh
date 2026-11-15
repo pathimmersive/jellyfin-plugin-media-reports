@@ -1045,9 +1045,9 @@ with sync_playwright() as p:
 
     # My Reports: the admin moves the issues on, and each user follows theirs.
     issues = {r["reasonCode"]: r["issueId"] for r in export["reports"]}
-    admin("/MediaReports/Admin/Issues/%d" % issues["stutter"], {"status": "Fixed", "notes": SECRET}, method="PATCH")
-    admin("/MediaReports/Admin/Issues/Status", {"issueIds": [issues["subtitles"]], "status": "Investigating"})
-    admin("/MediaReports/Admin/Issues/Status", {"issueIds": [issues["poor-quality"]], "status": "WontFix"})
+    admin("/MediaReports/Admin/Issues/%d" % issues["stutter"], {"status": "fixed", "notes": SECRET}, method="PATCH")
+    admin("/MediaReports/Admin/Issues/Status", {"issueIds": [issues["subtitles"]], "status": "investigating"})
+    admin("/MediaReports/Admin/Issues/Status", {"issueIds": [issues["poor-quality"]], "status": "wont-fix"})
     # Bob and Carol have profile pictures, so the dot has to sit above one.
     for user in admin("/Users"):
         if user["Name"] in ("bob", "carol"):

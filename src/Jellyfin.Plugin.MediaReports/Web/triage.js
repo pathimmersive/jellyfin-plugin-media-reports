@@ -6,15 +6,15 @@ const PAGE = 'mediareports';
 const API = 'MediaReports/Admin/';
 
 const STATUSES = [
-    { code: 'New', label: 'New', bg: 'rgba(0,164,220,.18)', fg: '#4fc3ec' },
-    { code: 'Investigating', label: 'Investigating', bg: 'rgba(242,176,30,.18)', fg: '#f5c451' },
-    { code: 'ReplacedVerify', label: 'Replaced – verify', bg: 'rgba(179,136,255,.18)', fg: '#c7a8ff' },
-    { code: 'Fixed', label: 'Fixed', bg: 'rgba(102,187,106,.18)', fg: '#8fd193' },
-    { code: 'WontFix', label: "Won't fix", bg: 'rgba(255,255,255,.1)', fg: 'rgba(255,255,255,.75)' },
-    { code: 'Duplicate', label: 'Duplicate', bg: 'rgba(255,255,255,.1)', fg: 'rgba(255,255,255,.75)' },
-    { code: 'CantReproduce', label: "Can't reproduce", bg: 'rgba(255,255,255,.1)', fg: 'rgba(255,255,255,.75)' }
+    { code: 'new', label: 'New', bg: 'rgba(0,164,220,.18)', fg: '#4fc3ec' },
+    { code: 'investigating', label: 'Investigating', bg: 'rgba(242,176,30,.18)', fg: '#f5c451' },
+    { code: 'replaced-verify', label: 'Replaced – verify', bg: 'rgba(179,136,255,.18)', fg: '#c7a8ff' },
+    { code: 'fixed', label: 'Fixed', bg: 'rgba(102,187,106,.18)', fg: '#8fd193' },
+    { code: 'wont-fix', label: "Won't fix", bg: 'rgba(255,255,255,.1)', fg: 'rgba(255,255,255,.75)' },
+    { code: 'duplicate', label: 'Duplicate', bg: 'rgba(255,255,255,.1)', fg: 'rgba(255,255,255,.75)' },
+    { code: 'cant-reproduce', label: "Can't reproduce", bg: 'rgba(255,255,255,.1)', fg: 'rgba(255,255,255,.75)' }
 ];
-const MIXED = { code: 'Mixed', label: 'Mixed', bg: 'rgba(255,255,255,.1)', fg: 'rgba(255,255,255,.75)' };
+const MIXED = { code: 'mixed', label: 'Mixed', bg: 'rgba(255,255,255,.1)', fg: 'rgba(255,255,255,.75)' };
 
 const LIST_KEYS = ['view', 'groupBy', 'reason', 'client', 'q', 'sort', 'page'];
 const DEFAULTS = { view: 'open', groupBy: 'title', sort: 'last', page: '1' };
@@ -211,7 +211,7 @@ function icon(name) {
 }
 
 function status(code) {
-    return STATUSES.find((s) => s.code === code) || (code === 'Mixed' ? MIXED : { code, label: code, bg: MIXED.bg, fg: MIXED.fg });
+    return STATUSES.find((s) => s.code === code) || (code === 'mixed' ? MIXED : { code, label: code, bg: MIXED.bg, fg: MIXED.fg });
 }
 
 function pill(code) {
@@ -549,7 +549,7 @@ function table(params, list, seenNew, navigate) {
         const message = h('span', { role: 'status', className: 'mrOk', style: 'margin-left:12px' });
         const select = h('select', { className: 'mrSelect', 'aria-label': 'Set status for all' },
             h('option', { value: '' }, 'Set status for all…'),
-            STATUSES.filter((s) => s.code !== 'ReplacedVerify').map((s) => h('option', { value: s.code }, s.label)));
+            STATUSES.filter((s) => s.code !== 'replaced-verify').map((s) => h('option', { value: s.code }, s.label)));
         select.addEventListener('change', () => {
             if (!select.value) {
                 return;
@@ -717,8 +717,8 @@ function issuePage(params, issue, navigate) {
     const last = reports.length ? reports[0].CreatedAt : issue.CreatedAt;
 
     const statusSelect = h('select', { id: statusId, className: 'mrSelect mrStatusSelect' },
-        STATUSES.filter((s) => s.code !== 'ReplacedVerify' || issue.Status === 'ReplacedVerify')
-            .map((s) => h('option', { value: s.code, selected: s.code === issue.Status, disabled: s.code === 'ReplacedVerify' }, s.label)));
+        STATUSES.filter((s) => s.code !== 'replaced-verify' || issue.Status === 'replaced-verify')
+            .map((s) => h('option', { value: s.code, selected: s.code === issue.Status, disabled: s.code === 'replaced-verify' }, s.label)));
     statusSelect.addEventListener('change', () => {
         call('PATCH', `Issues/${issue.Id}`, null, { status: statusSelect.value }).then(reload, (failure) => refusal(failure).then((r) => {
             statusSelect.value = issue.Status;

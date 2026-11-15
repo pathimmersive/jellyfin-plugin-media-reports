@@ -65,8 +65,10 @@ for people beside it:
 | `cant-reproduce` | Can't reproduce | yes |
 
 `investigating` also covers a report whose title's file changed, while the admin checks the
-fix. Admin routes use the plugin's own names instead (`New`, `Investigating`,
-`ReplacedVerify`, `Fixed`, `WontFix`, `Duplicate`, `CantReproduce`).
+fix. Admin routes use the same codes plus the plugin's own `replaced-verify` (the title's file
+changed and the admin still has to check the fix), and `mixed` for a season row whose episodes
+differ: `new`, `investigating`, `replaced-verify`, `fixed`, `wont-fix`, `duplicate`,
+`cant-reproduce`.
 
 ## Plugin
 
@@ -262,13 +264,13 @@ One page of issues. Query:
 { "Rows": [ { "Kind": "issue", "IssueId": 9, "ItemId": "6f1c…", "ItemType": "Episode", "Title": "Test Series",
     "Line": "S02E05 · Pilot", "ReasonCode": "stutter", "ReasonLabel": "Stutter or jitter", "Reports": 2, "People": 2,
     "Clients": ["Jellyfin Roku"], "Client": null, "PlayMethods": [ { "Method": "Transcode", "Count": 2 } ],
-    "Status": "New", "StatusLabel": "New", "LastReport": "…", "IsNew": true } ],
+    "Status": "new", "StatusLabel": "New", "LastReport": "…", "IsNew": true } ],
   "Total": 120, "Page": 1, "PageSize": 50, "Reasons": [ { "Code": "stutter", "Label": "Stutter or jitter" } ], "Clients": ["Jellyfin Roku"] }
 ```
 
 Three or more episode issues of one season with the same reason come back as one row with
 `Kind` `season`, `SeriesId`, `SeasonNumber`, `EpisodeCount`, and the episode rows in `Children`.
-Its `Status` is the shared status, or `Mixed`.
+Its `Status` is the shared status, or `mixed`.
 
 Refusal: 400 `bad-query` (an unknown `view`, `groupBy` or `sort`, or a page below 1).
 
@@ -289,17 +291,17 @@ Refusal: 404 `issue-not-found`.
 Changes an issue's status, notes, or both, and answers with the issue as above.
 
 ```json
-{ "status": "Fixed", "notes": "Re-encoded the file." }
+{ "status": "fixed", "notes": "Re-encoded the file." }
 ```
 
-A status change is logged in the issue's history. A closed status (`Fixed`, `WontFix`,
-`Duplicate`, `CantReproduce`) sets `ClosedAt` and tells the reporters. Reopening clears it.
+A status change is logged in the issue's history. A closed status (`fixed`, `wont-fix`,
+`duplicate`, `cant-reproduce`) sets `ClosedAt` and tells the reporters. Reopening clears it.
 
 Refusals:
 
 | Status | Code | When |
 |---|---|---|
-| 400 | `status-not-allowed` | An unknown status, or `ReplacedVerify`, which only the plugin sets. |
+| 400 | `status-not-allowed` | An unknown status, or `replaced-verify`, which only the plugin sets. |
 | 400 | `notes-too-long` | Notes over 10,000 characters. |
 | 404 | `issue-not-found` | No such issue. |
 | 409 | `newer-open-issue` | A reopen while a newer open issue exists for the same title and reason. `IssueId` names it. |
@@ -309,7 +311,7 @@ Refusals:
 Sets one status on several issues, all or none. Answers with the ids set.
 
 ```json
-{ "issueIds": [9, 10, 11], "status": "Investigating" }
+{ "issueIds": [9, 10, 11], "status": "investigating" }
 ```
 
 Refusals are those of PATCH, plus 400 `no-issues` for an empty list. `IssueIds` names every

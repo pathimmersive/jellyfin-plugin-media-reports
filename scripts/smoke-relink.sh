@@ -183,7 +183,7 @@ set_status() { as_admin PATCH "/MediaReports/Admin/Issues/$1" "{\"Status\":\"$2\
 echo "== alice reports the titles; the admin fixes one"
 alpha_open="$(file "$alpha" stutter)"
 alpha_fixed="$(file "$alpha" audio)"
-set_status "$alpha_fixed" Fixed
+set_status "$alpha_fixed" fixed
 beta_issue="$(file "$beta" stutter)"
 gamma_issue="$(file "$gamma" stutter)"
 e01_issue="$(file "$e01" audio)"
@@ -221,7 +221,7 @@ scan
 wait_for "the episode's issue did not become Replaced - verify after its file changed" \
   issue_is "$e01_issue" "d['Status'] == 'replaced-verify' and any(h.get('Detail') == 'The file changed' for h in d['History'])"
 echo "episode: Replaced - verify, The file changed"
-set_status "$e01_issue" Investigating
+set_status "$e01_issue" investigating
 sleep 2
 cp "$work/clips/clip-2.mkv" "$show/Show (2026) S01E01.mkv"
 touch "$show/Show (2026) S01E01.mkv"

@@ -127,9 +127,16 @@ item() {
   call smoke box "$admin" GET "/Items?userId=$admin_id&IncludeItemTypes=Movie&Recursive=true&Fields=Path" |
     py -c "import json,sys; print(next((i['Id'] for i in json.load(sys.stdin)['Items'] if '/'+sys.argv[1]+'/' in (i.get('Path') or '')), ''))" "$1"
 }
+# A scan started by the startup wizard can still be running when the library is added, and
+# then the new folder is not scanned; ask for another scan every 15 s until both clips show.
 deadline=$((SECONDS + timeout))
+next_scan=$((SECONDS + 15))
 until [[ -n "$(item "Plain (2026)")" && -n "$(item "Heavy (2026)")" ]]; do
   (( SECONDS < deadline )) || fail "the clips did not appear in the library"
+  if (( SECONDS >= next_scan )); then
+    call smoke box "$admin" POST /Library/Refresh >/dev/null
+    next_scan=$((SECONDS + 15))
+  fi
   sleep 3
 done
 plain="$(item "Plain (2026)")"

@@ -189,8 +189,8 @@ public class PlaybackCaptureTests
     [Fact]
     public async Task Endpoint_ReturnsOnlyTheCallersPlaybacks()
     {
-        Progress(Session("alice-tv", Alice, "TV", PlayMethod.DirectPlay));
-        Progress(Session("bob-tv", Bob, "TV", PlayMethod.DirectPlay));
+        Progress(Session("alice-tv", Alice, "Alice TV", PlayMethod.DirectPlay));
+        Progress(Session("bob-tv", Bob, "Bob TV", PlayMethod.DirectPlay));
         var authorization = new Mock<IAuthorizationContext>();
         authorization.Setup(a => a.GetAuthorizationInfo(It.IsAny<HttpContext>()))
             .ReturnsAsync(new AuthorizationInfo { User = new Jellyfin.Database.Implementations.Entities.User("bob", "provider", "reset") { Id = Bob } });
@@ -202,8 +202,8 @@ public class PlaybackCaptureTests
         var result = await controller.GetPlaybacks();
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
-        var playbacks = Assert.IsAssignableFrom<IReadOnlyList<PlaybackEntry>>(ok.Value);
-        Assert.Equal(["bob-tv"], playbacks.Select(p => p.SessionId));
+        var playbacks = Assert.IsAssignableFrom<IReadOnlyList<PlaybackView>>(ok.Value);
+        Assert.Equal(["Bob TV"], playbacks.Select(p => p.DeviceName));
     }
 
     [Fact]
@@ -232,6 +232,25 @@ public class PlaybackCaptureTests
         Assert.Contains("ContainerBitrateExceedsLimit", sample.TranscodeReasons);
         Assert.Equal("Test Client", sample.Client);
         Assert.Equal(_clock.GetUtcNow(), sample.At);
+    }
+
+    [Fact]
+    public async Task AThrowingLibrary_NeverReachesJellyfin_AndIsWarnedAtMostOnceAMinute()
+    {
+        var library = new Mock<ILibraryManager>();
+        library.Setup(m => m.GetItemById(It.IsAny<Guid>())).Throws(new InvalidOperationException("library gone"));
+        var logger = new ListLogger<PlaybackCapture>();
+        var capture = new PlaybackCapture(_sessions.Object, library.Object, _clock, () => _retention, logger);
+        await capture.StartAsync(default);
+
+        Progress(Session("tv", Alice, "Living Room TV", PlayMethod.DirectPlay));
+        Progress(Session("tv", Alice, "Living Room TV", PlayMethod.DirectPlay));
+        Assert.Single(logger.Warnings);
+
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        Progress(Session("tv", Alice, "Living Room TV", PlayMethod.DirectPlay));
+        Assert.Equal(2, logger.Warnings.Count);
+        await capture.StopAsync(default);
     }
 
     [Fact]

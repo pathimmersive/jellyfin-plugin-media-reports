@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Starts a real Jellyfin 12 server in Docker with the plugin and checks report storage end
 # to end: the database is created on first start; a database written at schema version 1 is
-# migrated on the next start; deleting a user anonymises their reports; the purge task
-# removes old closed issues and keeps open ones; the copy task writes a consistent copy that
-# a server can start on; and the export downloads for an admin and is refused otherwise.
+# migrated on the next start; deleting a user anonymises their reports and suspected
+# problems; the purge task removes old closed issues and keeps open ones; the copy task
+# writes a consistent copy that a server can start on; and the export downloads for an
+# admin and is refused otherwise.
 #
 # Usage: scripts/smoke-storage.sh [--without-plugin]
 #   --without-plugin  start the server with no plugin; the script must fail
@@ -216,9 +217,27 @@ db = sqlite3.connect(sys.argv[1])
 tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
 assert {"client_seen", "plugin_state", "finding"} <= tables, tables
 rows = db.execute("SELECT client, version, first_seen, last_load, last_play FROM client_seen").fetchall()
-assert len(rows) == 1 and rows[0][0] == "Jellyfin Web" and rows[0][1] == "10.12.0" and rows[0][3], rows
-print("client_seen: one row for Jellyfin Web with its last load, kept on disk; the finding table exists")
+assert len(rows) == 1 and rows[0][0] == "media-reports-smoke" and rows[0][1] == "1.0.0" and rows[0][3], rows
+print("client_seen: one row for the session's app with its last load, kept on disk; the finding table exists")
 PY
+echo "== add a suspected problem for the reporter and one for another user"
+py - "$work/after-restart.db" "$reporter_id" <<'PY'
+import sqlite3, sys, uuid, datetime
+db = sqlite3.connect(sys.argv[1])
+reporter = str(uuid.UUID(sys.argv[2]))
+now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.0000000Z")
+for key, user, name, device in (("reporter-play", reporter, "reporter", "Reporter's Phone"), ("other-play", str(uuid.uuid4()), "other", "Living Room TV")):
+    db.execute("INSERT INTO finding (kind, playback_key, item_id, title, user_id, user_name, device, client, first_seen, last_seen, detail) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+               ("freezing", key, str(uuid.uuid4()), "Seeded " + key, user, name, device, "Jellyfin Roku", now, now, "Position jumped back 8 s, 3 times"))
+db.commit()
+db.execute("PRAGMA journal_mode = DELETE")
+db.close()
+PY
+: >"$work/empty"
+MSYS_NO_PATHCONV=1 docker cp "$(host_path "$work/after-restart.db")" "$container:$db_dir/media-reports.db"
+for side in wal shm; do
+  MSYS_NO_PATHCONV=1 docker cp "$(host_path "$work/empty")" "$container:$db_dir/media-reports.db-$side"
+done
 start_server
 token="$(sign_in admin admin-password)"
 
@@ -230,8 +249,24 @@ echo "non-admin export: $code"
 headers="$(curl -sS -D - -o /dev/null "$api/MediaReports/Admin/Export" -H "Authorization: $auth, Token=\"$token\"")"
 grep -qi '^content-disposition: attachment; filename=media-reports-export-' <<<"$headers" || fail "the export is not a file download"
 
-echo "== deleting the reporter anonymises their reports"
+echo "== deleting the reporter anonymises their reports and suspected problems"
+call GET /MediaReports/Admin/Findings >"$work/results/findings-before.json"
+py - "$work/results/findings-before.json" <<'PY' || fail "the seeded suspected problems are not listed"
+import json, sys
+rows = {r["Title"]: r for r in json.load(open(sys.argv[1]))["Rows"]}
+assert rows["Seeded reporter-play"]["UserName"] == "reporter" and rows["Seeded reporter-play"]["Device"] == "Reporter's Phone", rows
+PY
 call DELETE "/Users/$reporter_id" >/dev/null
+call GET /MediaReports/Admin/Findings >"$work/results/findings-after.json"
+py - "$work/results/findings-after.json" <<'PY' || fail "the deleted user's suspected problems still name them"
+import json, sys
+rows = {r["Title"]: r for r in json.load(open(sys.argv[1]))["Rows"]}
+mine, other = rows["Seeded reporter-play"], rows["Seeded other-play"]
+assert mine.get("UserName") is None and mine.get("Device") is None, mine
+assert mine["Kind"] == "freezing" and mine["Detail"].startswith("Position jumped back"), mine
+assert other["UserName"] == "other" and other["Device"] == "Living Room TV", other
+print("anonymised: the reporter's suspected problem kept, with no name or device; the other user's untouched")
+PY
 export_reports anonymised
 py - "$work/results/anonymised.json" "$reporter_id" <<'PY' || fail "the deleted user's reports were not anonymised"
 import json, sys, uuid

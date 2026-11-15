@@ -12,6 +12,7 @@ namespace Jellyfin.Plugin.MediaReports.Api;
 /// The signed-in user's endpoints for filing a report. Every call acts as the caller; none takes a user id.
 /// </summary>
 [ApiController]
+[ApiErrors]
 [Authorize]
 [Route("MediaReports/Report")]
 public sealed class ReportController : ControllerBase
@@ -62,6 +63,7 @@ public sealed class ReportController : ControllerBase
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
     public async Task<ActionResult<FiledReportView>> File([FromBody] FileReportRequest request)
     {
         var (userId, deviceId) = await Caller().ConfigureAwait(false);
@@ -70,7 +72,17 @@ public sealed class ReportController : ControllerBase
             return Forbid();
         }
 
-        return Answer(() => _service.File(userId.Value, deviceId, request), StatusCodes.Status201Created);
+        ServiceResult<FiledReportView> result;
+        try
+        {
+            result = await _service.FileAsync(userId.Value, deviceId, request, HttpContext.RequestAborted).ConfigureAwait(false);
+        }
+        catch (StorageUnavailableException)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new ApiError("storage-unavailable", "Reports can't be stored right now."));
+        }
+
+        return Answer(() => result, StatusCodes.Status201Created);
     }
 
     /// <summary>
@@ -91,7 +103,7 @@ public sealed class ReportController : ControllerBase
     }
 
     /// <summary>
-    /// Opens one of the caller's reports and marks its status as seen.
+    /// Opens one of the caller's reports. Reading it changes nothing.
     /// </summary>
     /// <param name="id">The report.</param>
     /// <returns>The report.</returns>
@@ -136,6 +148,26 @@ public sealed class ReportController : ControllerBase
     /// </summary>
     /// <param name="id">The report.</param>
     /// <returns>No content.</returns>
+    [HttpPost("Mine/{id}/Seen")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult> Seen([FromRoute] long id)
+    {
+        var (userId, _) = await Caller().ConfigureAwait(false);
+        if (userId is null)
+        {
+            return Forbid();
+        }
+
+        var answer = Answer(() => _service.MarkSeen(userId.Value, id), StatusCodes.Status204NoContent);
+        return answer.StatusCode == StatusCodes.Status204NoContent ? NoContent() : answer;
+    }
+
+    /// <summary>
+    /// Removes one of the caller's closed reports from their list.
+    /// </summary>
+    /// <param name="id">The report.</param>
+    /// <returns>No content, or a refusal.</returns>
     [HttpPost("Mine/{id}/Hide")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -193,6 +225,7 @@ public sealed class ReportController : ControllerBase
             Outcome.BadRequest => StatusCode(StatusCodes.Status400BadRequest, new ApiError(result.Code!, result.Message!)),
             Outcome.Forbidden => StatusCode(StatusCodes.Status403Forbidden, new ApiError(result.Code!, result.Message!)),
             Outcome.NotFound => StatusCode(StatusCodes.Status404NotFound, new ApiError(result.Code!, result.Message!)),
+            Outcome.TooManyRequests => StatusCode(StatusCodes.Status429TooManyRequests, new ApiError(result.Code!, result.Message!)),
             _ => StatusCode(StatusCodes.Status409Conflict, new ApiError(result.Code!, result.Message!)),
         };
     }

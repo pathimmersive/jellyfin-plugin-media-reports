@@ -7,19 +7,72 @@
 
 # Media Reports for Jellyfin
 
-Media Reports is a Jellyfin server plugin that lets the users of a server report a problem with a movie, show, season or episode: it won't play, plays incorrectly, looks poor, stutters, or has the wrong audio or subtitles. The admin gets one place to view and work those reports. Each report will carry the playback details the server already knows, such as client, device, direct play or transcode and why, codecs and position, so the user only has to pick a reason.
+Media Reports is a Jellyfin server plugin for finding out when playback goes wrong for the people who use your server. Users report a problem with a movie, show, season or episode from a Report button in the app. The plugin also watches playback on every app, TV apps included, and lists what looks wrong without anyone pressing a button. You work both from one page in the Dashboard.
 
-> **Status: early development.** The plugin installs and loads but has no features yet, and no release has been published.
+Each report carries the playback details the server already knows: the app and device, direct play or transcode and why, the codecs and the position. The user only picks a reason.
 
 This is an unofficial, third-party plugin. It is not affiliated with or endorsed by the Jellyfin project.
 
-## Requirements
+## Features
 
-- Jellyfin 12.0 or later 12.x (`targetAbi` 12.0.0.0). It is tested on 12.0, 12.1 and 12.2.
+**For users**
+
+- A **Report a problem** button (a flag) after the favourite button on movie, episode, season and series pages, and in the video player.
+- A short dialog: pick a reason (Won't play, Stutter or jitter, Audio problem and so on), add a note if they want, send.
+- **My Reports** in the user menu: each report with its status and history, a dot when something changed, and a short on-screen notice when a report is resolved while the app is open. A report can be withdrawn while it is still new.
+
+<p align="center">
+  <img alt="A movie page in Jellyfin Web with the Report a problem button after the favourite button" src="assets/screenshots/report-button.png" width="720">
+</p>
+<p align="center">
+  <img alt="The report dialog with the reasons and a note" src="assets/screenshots/report-dialog.png" width="360">
+  <img alt="My Reports with two reports and their status" src="assets/screenshots/my-reports.png" width="360">
+</p>
+
+**For admins**, on the **Media Reports** page in the Dashboard menu:
+
+- **Reports:** reports on the same title for the same reason are one issue, so a problem is worked once however many people hit it. Show open or closed issues, filter by reason and app, search titles, split a row by app to tell a file problem from an app problem, and see a season's episodes rolled up into one row.
+- **An issue:** every report with its playback details, the file, a status (New, Investigating, Fixed, Won't fix, Duplicate, Can't reproduce, and Replaced – verify, which the plugin sets when the file changes), private notes and the full history. **Refresh metadata** and **Rescan** run on that title only.
+- **Suspected problems:** what the plugin noticed on its own, by kind: freezing, a transcoder slower than the video, low quality, and direct play failing mid-play. Each finding names the title, user, device and app, and what the server saw ("Transcoding at 3.1 fps against 24 fps for 52 s").
+- **Replaced files:** when a title's file is replaced, its open reports follow it and the issue is set to Replaced – verify.
+- **Alerts:** each new report goes to a Discord webhook, a generic JSON webhook and Jellyfin's activity log within a minute. The page also warns when the Report button has stopped loading in every app, which usually means a Jellyfin update broke it.
+- **Metrics** for Prometheus, with counts only.
+
+<p align="center">
+  <img alt="The Reports tab of the Media Reports page" src="assets/screenshots/admin-reports.png" width="720">
+</p>
+<p align="center">
+  <img alt="One issue with its reports, playback details and history" src="assets/screenshots/admin-issue.png" width="720">
+</p>
+<p align="center">
+  <img alt="The Suspected problems tab with findings for freezing, slow transcoding and low quality" src="assets/screenshots/suspected-problems.png" width="720">
+</p>
+
+## Which apps get the Report button
+
+The button lives inside jellyfin-web, so it appears in the apps built on it:
+
+| App | Report button | Suspected problems |
+|---|---|---|
+| Jellyfin Web, in a desktop or phone browser | Title pages and the player | Yes |
+| Jellyfin for Android | Title pages; in the player only when its video player setting is **Web player** | Yes |
+| Jellyfin for webOS | Title pages and the player | Yes |
+| Jellyfin for Android TV, Roku and other native apps | No | Yes |
+
+Native apps don't run jellyfin-web, so a plugin can't add anything to them. Playback there is still watched, and problems show under **Suspected problems**. The iOS app loads the same web client, so the button may appear there, but it isn't tested.
+
+## How the Report button reaches Jellyfin Web
+
+Jellyfin has no way for a plugin to add a button to its web client, so Media Reports changes jellyfin-web's `index.html` as the server sends it:
+
+- It adds one `<script>` tag for its own `reporter.js` before `</head>`, and nothing else.
+- It never writes jellyfin-web's files on disk. Uninstall the plugin, or turn reporting off, and the page is served as it was.
+- It asks Jellyfin for the page uncompressed so it can add the tag, so `index.html` (and only that page) is sent without gzip or Brotli. A reverse proxy that compresses responses still compresses it.
+- It does not need File Transformation. Plugins that change the page through File Transformation, such as Jellyfin Enhanced, keep their changes: Media Reports only inserts its tag into the page it is given, and leaves a page that already carries the tag alone, so the page gets exactly one.
 
 ## Install
 
-Once the first release is published:
+Media Reports needs Jellyfin 12.0 or later 12.x (`targetAbi` 12.0.0.0). It is tested on 12.0, 12.1 and 12.2.
 
 1. In the Jellyfin dashboard, open **Plugins → Repositories** and add this repository URL:
 
@@ -28,8 +81,78 @@ Once the first release is published:
    ```
 
 2. Open **Plugins → Catalog**, install **Media Reports**, and restart the server.
+3. Reload Jellyfin Web. The Report button is on title pages, and **Media Reports** is in the Dashboard menu.
 
 Jellyfin checks each download against the checksum in the repository manifest.
+
+## Settings
+
+Open **Media Reports** in the Dashboard menu, then **Settings**. Changes apply without a restart; apps pick them up on their next page load.
+
+- **Reasons:** what users pick from. Rename, reorder, add or retire reasons. Renaming keeps the reason on its reports; a retired reason is no longer offered but stays on the reports that used it.
+- **Reporting:** **Let users report problems** is on in a fresh install. Off removes the Report button and My Reports from every app and refuses new reports. Reports already filed stay.
+- **Suspected problems:** one switch per kind, all on by default. A kind switched off adds no new findings.
+- **Alerts:** a Discord webhook address, a generic webhook address that gets one JSON POST per batch of reports, and **Send a test alert**. With both empty nothing is sent; the activity log entry is written either way.
+- **Metrics:** the section shows the metrics address (`/MediaReports/Metrics` on your server) and a Prometheus scrape config to copy. Create an API key in **Dashboard → API Keys** for the scrape. The weekly digest, paging and routing belong in your own monitoring.
+- **Keeping reports:** closed reports are deleted after 365 days by default; 0 keeps them forever. **Export all reports** downloads every report, issue and history entry as one JSON file.
+
+A user can file at most 30 reports an hour.
+
+## Update
+
+When a new version is released, Jellyfin offers it under **Plugins → My Plugins** from the same repository URL. Install it and restart the server. Reports, issues and settings are kept. Users get the new Report button on their next page load; there is nothing to clear.
+
+## Uninstall
+
+1. In **Plugins → My Plugins**, uninstall **Media Reports** and restart the server. The Report button is gone at the next page load in each app.
+2. The reports database is left in place in case you reinstall. To remove every report, delete the `media-reports` folder in the server's data folder (`/config/data/media-reports` in the official Docker image).
+
+## Troubleshooting
+
+**No Report button.**
+
+- Check that **Let users report problems** is on in Settings, then reload the page. An app opened before the change needs a reload.
+- In Jellyfin for Android the player has the button only with the **Web player** setting; title pages always have it.
+- Native TV apps never show it; see [Which apps get the Report button](#which-apps-get-the-report-button).
+- Open `/web/index.html` on your server and look for `MediaReports/web/reporter.js` in the page source. If it isn't there, check the server log for lines from Media Reports. A reverse proxy or CDN that caches `index.html` can keep serving the page from before the install; clear its cache.
+
+**"The Report button hasn't loaded in any app for 7 days."** Apps built on jellyfin-web played something in those 7 days, but none of them loaded the button. This usually follows a Jellyfin update that changed the web client. Check the troubleshooting steps above, look for a newer Media Reports version, and open an issue if there is none.
+
+**No alert arrives.** Use **Send a test alert** in Settings: it shows, per address, whether the webhook accepted the message. A failed alert is logged as a warning and retried once after 30 seconds.
+
+**The metrics answer 401 or 403.** The metrics need an API key from **Dashboard → API Keys**, sent as `Authorization: MediaBrowser Token="<key>"`, as in the scrape config the Settings tab shows.
+
+**"You've sent 30 reports in the past hour."** The limit keeps one account from flooding the list. It clears an hour after the earlier reports.
+
+**A report shows no playback details.** The server keeps each user's last 10 playbacks for 24 hours, in memory only. A report filed after a restart, or long after the playback, has none.
+
+## Privacy and stored data
+
+Suspected problems watching is on by default. From the moment the plugin is installed it watches playback on every app and records each user's playback problems: the title, the user's name, the device and app, and what the server saw. Findings are kept 30 days. Turn a kind off under **Settings → Suspected problems**, and tell your users the server does this.
+
+Everything stays on your server. Data leaves it only through the webhooks and the metrics endpoint you set up yourself. Admins see everything; a user sees only their own reports, never the file path or your notes.
+
+[What the plugin stores](docs/data.md) lists every table and column, where the files are, who sees what, and how long each thing is kept.
+
+## Versioning
+
+Versions are `major.minor.patch`; Jellyfin shows them with a fourth part, `0.1.0.0`.
+
+- **Patch** (0.1.1): fixes only.
+- **Minor** (0.2.0): new features. Settings and stored reports carry over.
+- **Major**: a change to the HTTP API or to stored data that can't carry over. The API version in `GET /MediaReports/Info` changes with it.
+
+The API version is separate from the plugin version: any change that would break a client raises it, before 1.0.0 too, and [CHANGELOG.md](CHANGELOG.md) says so. New fields and new routes don't raise it ([docs/api.md](docs/api.md)).
+
+| Media Reports | Jellyfin |
+|---|---|
+| 0.1.x | 12.0 and later 12.x |
+
+Each release's notes, and the changelog Jellyfin shows in the catalog, are its entry in [CHANGELOG.md](CHANGELOG.md).
+
+## API for other clients
+
+Any Jellyfin client can file and follow reports through the plugin's HTTP API. Call `GET /MediaReports/Info` to check the plugin is installed. [docs/api.md](docs/api.md) covers every route, with its sign-in, request, answer and error codes.
 
 ## Build from source
 
@@ -37,83 +160,11 @@ You need the .NET 10 SDK (pinned in `global.json`) and, for the load checks, Doc
 
 ```bash
 dotnet test                          # build and run the unit tests
-bash scripts/smoke-load.sh           # load the plugin into Jellyfin 12.0, 12.1 and 12.x containers
+bash scripts/smoke-load.sh           # load the plugin into Jellyfin 12.0, 12.1 and 12.2 containers
 bash scripts/repo-install-check.sh   # install it from a local plugin repository into a Jellyfin container
 ```
 
 `scripts/package.sh` builds a release zip and its manifest entry. See [CONTRIBUTING.md](CONTRIBUTING.md) for how changes are made.
-
-## What the plugin stores
-
-Everything stays on your Jellyfin server. Data leaves the server only through the webhooks and the metrics endpoint you set up yourself; nothing is sent anywhere by default.
-
-### Where
-
-- **Reports database:** `media-reports/media-reports.db` in the server's data folder (`/config/data` in the official Docker image). It is created on first start and survives plugin updates and reinstalls.
-- **Daily copy:** `media-reports/media-reports.backup.db`, written each day by the **Copy media reports database** scheduled task. Back up this file rather than the live one. To restore, stop the server and put the copy in place of `media-reports.db`.
-- **Settings:** Jellyfin's own plugin configuration file for Media Reports, in the server's plugin configuration folder. It holds the report reasons, the reporting switch, webhook addresses and the retention periods.
-- **Recent playbacks:** kept in memory only, never written to disk, and lost when the server restarts. Each user's last playbacks (at most 10) are kept for 24 hours by default, so a problem can still be reported after playback stops.
-
-### What each table holds
-
-`report`: one row per report a user files.
-
-- `id`, `created_at`, `issue_id` (the issue it was grouped into).
-- `reporter_user_id`, `reporter_name`: who filed it, by Jellyfin user id and the user name at the time.
-- `item_id`, `item_type`, `item_name`, `provider_ids` (TMDb, TVDb, IMDb), `series_id`, `series_name`, `series_provider_ids`, `season_number`, `episode_number`: what was reported.
-- `file_path`, `file_size`, `file_modified`: the file at report time. The path is shown only to admins.
-- `reason_code`, `note`: the reason picked and the user's own note.
-- `snapshot`: the playback details, as JSON: client and version, device name, play method, transcode reasons and output, position, the audio and subtitle streams, and the source file's streams. It holds no IP address, no file path and no user id.
-- `play_method`, `transcode_reasons`, `client`, `device`: copies from the snapshot, for filtering.
-- `reporter_seen_at`: when the reporter last opened the report, for the unread mark.
-- `reporter_hidden_at`: when the reporter removed the closed report from their own list.
-
-`issue`: one row per problem, grouping reports on the same title and reason.
-
-- `id`, `item_id`, `reason_code`, `status`, `created_at`, `updated_at`, `closed_at`.
-- `admin_notes`: private notes, seen only by admins.
-- `checked_file_size`, `checked_file_modified`: the file the issue was last checked against, to notice a replaced file.
-
-`event`: the history of each issue.
-
-- `id`, `at`, `issue_id`, `report_id`, `kind` (filed, withdrawn, status changed, note added, action run, relinked, purged, anonymised), `detail`.
-- `actor_user_id`: who did it, empty for the plugin itself.
-
-`admin_seen`: `user_id` and `seen_at`, when each admin last opened the report list.
-
-`client_seen`: one row per app name (such as Jellyfin Web), to warn when the Report button stops loading.
-
-- `client`, `version`: the app's name and version.
-- `first_seen`, `last_load`, `last_play`: when the row was written, when the Report button last loaded in that app, and when a playback last started in it.
-- It holds no user, device or address.
-
-`plugin_state`: `key` and `value`, a few named values kept across restarts: whether the Report button counts as stopped, and when reporting was last turned back on.
-
-`finding`: one row per suspected problem the plugin noticed on its own, one per playback and kind. It never becomes a report or an issue, and is deleted 30 days after it was last seen.
-
-- `id`, `kind` (freezing, slow-transcode, low-quality, playback-error), `playback_key` (the session and item it was seen in).
-- `item_id`, `item_type`, `title`, `series_id`, `series_name`, `season_number`, `episode_number`: what was playing.
-- `user_id`, `user_name`, `device`, `client`: who was watching, and on what.
-- `first_seen`, `last_seen`, `detail` (what the server saw, in words), `dismissed_at`.
-- It holds no file path or IP address.
-
-### Who sees what
-
-Admins see everything above. A user sees only their own reports, with the status and its history, never another user's reports, the file path or the admin's notes.
-
-### How long it is kept
-
-- Open reports are never deleted.
-- Closed reports are deleted, with their history, 365 days after they closed by the daily **Purge closed media reports** task. Change the period in the plugin's settings; 0 keeps them forever.
-- Suspected problems are deleted by the same task 30 days after they were last seen.
-- When a Jellyfin user is deleted, their reports are kept for the admin, but their user id, user name and device names are removed from them.
-- Users can withdraw their own report while it is still New.
-
-### Metrics, export and uninstall
-
-- The metrics endpoint carries counts only: no titles, paths or user names.
-- Admins can download every report, issue and history entry as one JSON file from the plugin's settings.
-- Uninstalling the plugin leaves `media-reports/` in the data folder. Delete that folder to remove all reports.
 
 ## License
 

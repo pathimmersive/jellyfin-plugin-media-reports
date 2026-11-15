@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Threading;
 using Jellyfin.Plugin.MediaReports.Relink;
 using Microsoft.Data.Sqlite;
 
@@ -29,6 +30,8 @@ public sealed class ReportStore
     private readonly TimeProvider _time;
     private readonly Func<int> _retentionDays;
 
+    private long _reportsVersion;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="ReportStore"/> class.
     /// </summary>
@@ -46,6 +49,12 @@ public sealed class ReportStore
     /// Gets the database.
     /// </summary>
     public ReportDatabase Database => _db;
+
+    /// <summary>
+    /// Gets a number that changes whenever a report or issue is added, moved, changes status
+    /// or is deleted, so a reader can keep what it read until it changes.
+    /// </summary>
+    public long ReportsVersion => Interlocked.Read(ref _reportsVersion);
 
     /// <summary>
     /// Stores a report in the open issue for its item and reason, or in a new issue.
@@ -115,6 +124,7 @@ public sealed class ReportStore
 
         AddEvent(connection, now, issueId, reportId, report.ReporterUserId, "filed", null);
         transaction.Commit();
+        Interlocked.Increment(ref _reportsVersion);
         return new FiledReport(reportId, issueId.Value);
     }
 
@@ -132,6 +142,7 @@ public sealed class ReportStore
         using var transaction = Transaction.Begin(connection, immediate: true);
         var result = SetStatus(connection, issueId, status, actorUserId, Now(), null);
         transaction.Commit();
+        Interlocked.Increment(ref _reportsVersion);
         return result;
     }
 
@@ -172,6 +183,7 @@ public sealed class ReportStore
         }
 
         transaction.Commit();
+        Interlocked.Increment(ref _reportsVersion);
         return result;
     }
 
@@ -206,6 +218,7 @@ public sealed class ReportStore
         if (refused.Count == 0)
         {
             transaction.Commit();
+            Interlocked.Increment(ref _reportsVersion);
             foreach (var id in closing)
             {
                 closed?.Add(id);
@@ -276,11 +289,13 @@ public sealed class ReportStore
         }
 
         transaction.Commit();
+        Interlocked.Increment(ref _reportsVersion);
         return ids.Count;
     }
 
     /// <summary>
-    /// Clears a deleted user from their reports and the history, keeping the reports.
+    /// Clears a deleted user from their reports, findings and the history, keeping the reports
+    /// and findings.
     /// </summary>
     /// <param name="userId">The deleted user.</param>
     /// <returns>How many reports were anonymised.</returns>
@@ -303,6 +318,7 @@ public sealed class ReportStore
 
         Execute(connection, "UPDATE event SET actor_user_id = NULL WHERE actor_user_id = $user", ("$user", user));
         Execute(connection, "DELETE FROM admin_seen WHERE user_id = $user", ("$user", user));
+        Execute(connection, "UPDATE finding SET user_id = NULL, user_name = NULL, device = NULL WHERE user_id = $user", ("$user", user));
         transaction.Commit();
         return reports.Count;
     }
@@ -351,6 +367,7 @@ public sealed class ReportStore
         }
 
         transaction.Commit();
+        Interlocked.Increment(ref _reportsVersion);
         return Withdrawal.Withdrawn;
     }
 
@@ -398,6 +415,7 @@ public sealed class ReportStore
         }
 
         transaction.Commit();
+        Interlocked.Increment(ref _reportsVersion);
         return issues.Count;
     }
 
@@ -502,6 +520,7 @@ public sealed class ReportStore
         }
 
         transaction.Commit();
+        Interlocked.Increment(ref _reportsVersion);
         return replaced;
     }
 
@@ -531,6 +550,7 @@ public sealed class ReportStore
             ("$client", client),
             ("$version", version),
             ("$now", Time(now)));
+        KeepNewestClients(connection);
         transaction.Commit();
         return true;
     }
@@ -543,6 +563,7 @@ public sealed class ReportStore
     public void RecordPlayStart(string client, string? version)
     {
         using var connection = _db.OpenConnection();
+        using var transaction = Transaction.Begin(connection, immediate: true);
         Execute(
             connection,
             """
@@ -552,7 +573,35 @@ public sealed class ReportStore
             ("$client", client),
             ("$version", version),
             ("$now", Now()));
+        KeepNewestClients(connection);
+        transaction.Commit();
     }
+
+    /// <summary>
+    /// The most apps kept in <c>client_seen</c>.
+    /// </summary>
+    public const int MaxClients = 50;
+
+    /// <summary>
+    /// The days an app is kept in <c>client_seen</c> after it was last seen.
+    /// </summary>
+    public const int ClientDays = 90;
+
+    /// <summary>
+    /// Deletes apps not seen (loaded or played) for <see cref="ClientDays"/> days.
+    /// </summary>
+    /// <returns>How many were deleted.</returns>
+    public int PurgeClients()
+    {
+        using var connection = _db.OpenConnection();
+        using var command = Command(connection, $"DELETE FROM client_seen WHERE {ClientLastSeen} < $cutoff", [("$cutoff", Time(_time.GetUtcNow() - TimeSpan.FromDays(ClientDays)))]);
+        return command.ExecuteNonQuery();
+    }
+
+    private const string ClientLastSeen = "MAX(COALESCE(last_load, first_seen), COALESCE(last_play, first_seen))";
+
+    private static void KeepNewestClients(SqliteConnection connection) =>
+        Execute(connection, $"DELETE FROM client_seen WHERE client NOT IN (SELECT client FROM client_seen ORDER BY {ClientLastSeen} DESC, client LIMIT {MaxClients})");
 
     /// <summary>
     /// Gets every client the plugin has seen load the Report button or start a web playback.
@@ -1246,7 +1295,7 @@ public sealed class ReportStore
     /// transactions take the write lock at once, so two reports filed together can't both
     /// start an issue. Disposing without a commit rolls back.
     /// </summary>
-    private sealed class Transaction : IDisposable
+    internal sealed class Transaction : IDisposable
     {
         private readonly SqliteConnection _connection;
         private bool _done;
@@ -1270,10 +1319,20 @@ public sealed class ReportStore
 
         public void Dispose()
         {
-            if (!_done)
+            if (_done)
             {
-                _done = true;
+                return;
+            }
+
+            _done = true;
+            try
+            {
                 Execute(_connection, "ROLLBACK");
+            }
+            catch (SqliteException)
+            {
+                // SQLite already rolled back after the error that brought us here; that error is
+                // the one the caller needs to see.
             }
         }
     }

@@ -90,6 +90,23 @@ public static class IssueStatuses
         IssueStatus.CantReproduce => "Can't reproduce",
         _ => status.ToString(),
     };
+
+    /// <summary>
+    /// Gets the status's code as the admin routes give and take it.
+    /// </summary>
+    /// <param name="status">The status.</param>
+    /// <returns>The kebab-case code.</returns>
+    public static string AdminCode(this IssueStatus status) => status switch
+    {
+        IssueStatus.New => "new",
+        IssueStatus.Investigating => "investigating",
+        IssueStatus.ReplacedVerify => "replaced-verify",
+        IssueStatus.Fixed => "fixed",
+        IssueStatus.WontFix => "wont-fix",
+        IssueStatus.Duplicate => "duplicate",
+        IssueStatus.CantReproduce => "cant-reproduce",
+        _ => throw new ArgumentOutOfRangeException(nameof(status), status, null),
+    };
 }
 
 /// <summary>

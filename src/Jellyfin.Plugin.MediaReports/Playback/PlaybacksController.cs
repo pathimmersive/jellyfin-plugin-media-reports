@@ -1,6 +1,8 @@
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using MediaBrowser.Controller.Net;
+using Jellyfin.Plugin.MediaReports.Api;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -11,6 +13,7 @@ namespace Jellyfin.Plugin.MediaReports.Playback;
 /// Serves the signed-in user's own live and recent playbacks.
 /// </summary>
 [ApiController]
+[ApiErrors]
 [Authorize]
 [Route("MediaReports")]
 public sealed class PlaybacksController : ControllerBase
@@ -35,7 +38,7 @@ public sealed class PlaybacksController : ControllerBase
     /// <returns>The playbacks.</returns>
     [HttpGet("Playbacks")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public async Task<ActionResult<IReadOnlyList<PlaybackEntry>>> GetPlaybacks()
+    public async Task<ActionResult<IReadOnlyList<PlaybackView>>> GetPlaybacks()
     {
         var info = await _authorization.GetAuthorizationInfo(HttpContext).ConfigureAwait(false);
         if (info.UserId.Equals(default))
@@ -43,6 +46,13 @@ public sealed class PlaybacksController : ControllerBase
             return Forbid();
         }
 
-        return Ok(_capture.GetPlaybacks(info.UserId));
+        return Ok(_capture.GetPlaybacks(info.UserId).Select(Shape).ToList());
     }
+
+    /// <summary>
+    /// Gets a playback as the route answers it.
+    /// </summary>
+    /// <param name="entry">The captured playback.</param>
+    /// <returns>The answer.</returns>
+    internal static PlaybackView Shape(PlaybackEntry entry) => PlaybackView.From(entry);
 }

@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
 # Publishes the plugin in Release and packages it as a Jellyfin plugin repository zip.
 #
-# Usage: scripts/package.sh <version> <out-dir> <source-url-base> [changelog]
+# Usage: scripts/package.sh <version> <out-dir> <source-url-base>
 #   version          x.y.z or x.y.z.w, with or without a leading v (a tag works)
 #   out-dir          where the zip and its manifest entry are written
 #   source-url-base  the URL the zip will be downloaded from, without the file name
+#
+# The version's CHANGELOG.md entry becomes the changelog in the manifest entry and in the
+# packaged meta.json; a version with no entry fails. CHANGELOG_FILE names another file.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-if [[ $# -lt 3 ]]; then
-  echo "usage: $0 <version> <out-dir> <source-url-base> [changelog]" >&2
+if [[ $# -ne 3 ]]; then
+  echo "usage: $0 <version> <out-dir> <source-url-base>" >&2
   exit 2
 fi
 
@@ -25,9 +28,12 @@ while [[ "$(tr -cd . <<<"$version" | wc -c)" -lt 3 ]]; do
 done
 
 out_dir="$2"
+changelog_file="${CHANGELOG_FILE:-CHANGELOG.md}"
+# Fail before the slow publish when the version has no entry.
+dotnet run scripts/release-tool.cs -- changelog --file "$changelog_file" --version "$version" >/dev/null
 publish_dir="$out_dir/publish"
 rm -rf "$publish_dir"
 dotnet publish src/Jellyfin.Plugin.MediaReports --nologo -c Release \
   -p:AssemblyVersion="$version" -p:FileVersion="$version" -o "$publish_dir"
 dotnet run scripts/release-tool.cs -- package --publish-dir "$publish_dir" --version "$version" \
-  --out "$out_dir" --source-url-base "$3" --changelog "${4:-}"
+  --out "$out_dir" --source-url-base "$3" --changelog-file "$changelog_file"

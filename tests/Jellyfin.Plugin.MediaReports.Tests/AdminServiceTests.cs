@@ -123,7 +123,7 @@ public sealed class AdminServiceTests : IDisposable
         var list = List(new IssueQuery());
 
         var season = Assert.Single(list.Rows, r => r.Kind == "season");
-        Assert.Equal((3, 3, "Mixed", "Season 1"), (season.EpisodeCount!.Value, season.Children.Count, season.Status, season.Line));
+        Assert.Equal((3, 3, "mixed", "Season 1"), (season.EpisodeCount!.Value, season.Children.Count, season.Status, season.Line));
         Assert.Equal(three.Select(f => f.IssueId), season.Children.Select(c => c.IssueId!.Value));
         Assert.Equal(3, list.Total);
         Assert.All(two, f => Assert.Contains(list.Rows, r => r.IssueId == f.IssueId));
@@ -139,7 +139,7 @@ public sealed class AdminServiceTests : IDisposable
 
         var byClient = List(new IssueQuery { GroupBy = "titleClient", Reason = "stutter" });
         Assert.Equal([("Jellyfin Web", 2), ("Jellyfin for WebOS", 1)], byClient.Rows.OrderByDescending(r => r.Reports).Select(r => (r.Client!, r.Reports)));
-        Assert.All(byClient.Rows, r => Assert.Equal((issue, "New"), (r.IssueId!.Value, r.Status)));
+        Assert.All(byClient.Rows, r => Assert.Equal((issue, "new"), (r.IssueId!.Value, r.Status)));
 
         Assert.Equal(issue, Assert.Single(List(new IssueQuery { Client = "Jellyfin for WebOS" }).Rows).IssueId);
         Assert.Equal("Other Film", Assert.Single(List(new IssueQuery { Q = "other" }).Rows).Title);
@@ -177,7 +177,7 @@ public sealed class AdminServiceTests : IDisposable
         Assert.Equal("Living Room TV", alice.Snapshot!.Value.GetProperty("deviceName").GetString());
         Assert.Null(detail.Reports[0].Snapshot);
         Assert.Equal([("filed", "alice"), ("filed", "bob"), ("status changed", "admin")], detail.History.Select(h => (h.Kind, h.ActorName!)));
-        Assert.Equal((2, "server-1", "Investigating"), (detail.People, detail.ServerId, detail.Status));
+        Assert.Equal((2, "server-1", "investigating"), (detail.People, detail.ServerId, detail.Status));
 
         var file = detail.File;
         Assert.True(file.InLibrary);
@@ -209,18 +209,18 @@ public sealed class AdminServiceTests : IDisposable
     {
         var issue = File(_alice, MovieId, "stutter").IssueId;
 
-        foreach (var status in new[] { "ReplacedVerify", "Bogus", "3", "fixed" })
+        foreach (var status in new[] { "replaced-verify", "ReplacedVerify", "Fixed", "Bogus", "3" })
         {
             Assert.Equal("status-not-allowed", _service.UpdateIssue(issue, new IssuePatch(status, "kept?"), _admin.Id).Code);
         }
 
         Assert.Null(_store.GetIssue(issue)!.AdminNotes);
-        var fixedIssue = Value(_service.UpdateIssue(issue, new IssuePatch("Fixed", null), _admin.Id));
-        Assert.Equal(("Fixed", _clock.GetUtcNow()), (fixedIssue.Status, fixedIssue.ClosedAt!.Value));
+        var fixedIssue = Value(_service.UpdateIssue(issue, new IssuePatch("fixed", null), _admin.Id));
+        Assert.Equal(("fixed", _clock.GetUtcNow()), (fixedIssue.Status, fixedIssue.ClosedAt!.Value));
         Assert.Equal(("status changed", "New → Fixed", "admin"), (fixedIssue.History[^1].Kind, fixedIssue.History[^1].Detail, fixedIssue.History[^1].ActorName!));
 
-        var reopened = Value(_service.UpdateIssue(issue, new IssuePatch("Investigating", null), _admin.Id));
-        Assert.Equal(("Investigating", (DateTimeOffset?)null), (reopened.Status, reopened.ClosedAt));
+        var reopened = Value(_service.UpdateIssue(issue, new IssuePatch("investigating", null), _admin.Id));
+        Assert.Equal(("investigating", (DateTimeOffset?)null), (reopened.Status, reopened.ClosedAt));
     }
 
     [Fact]
@@ -230,7 +230,7 @@ public sealed class AdminServiceTests : IDisposable
         _store.SetStatus(old, IssueStatus.Fixed, _admin.Id);
         var newer = File(_bob, MovieId, "audio").IssueId;
 
-        var refused = _service.UpdateIssue(old, new IssuePatch("New", "try again"), _admin.Id);
+        var refused = _service.UpdateIssue(old, new IssuePatch("new", "try again"), _admin.Id);
 
         Assert.Equal((Outcome.Conflict, "newer-open-issue"), (refused.Outcome, refused.Code));
         Assert.Equal([newer], refused.IssueIds);
@@ -260,20 +260,20 @@ public sealed class AdminServiceTests : IDisposable
         _store.SetStatus(old, IssueStatus.Fixed, _admin.Id);
         File(_bob, MovieId, "audio");
 
-        var refused = _service.SetStatuses(new IssueStatusRequest([.. issues, old], "New"), _admin.Id);
+        var refused = _service.SetStatuses(new IssueStatusRequest([.. issues, old], "new"), _admin.Id);
         Assert.Equal("newer-open-issue", refused.Code);
         Assert.Equal([old], refused.IssueIds!);
-        var missing = _service.SetStatuses(new IssueStatusRequest([issues[0], 999], "Investigating"), _admin.Id);
+        var missing = _service.SetStatuses(new IssueStatusRequest([issues[0], 999], "investigating"), _admin.Id);
         Assert.Equal("issue-not-found", missing.Code);
         Assert.All(issues, i => Assert.Equal(IssueStatus.New, _store.GetIssue(i)!.Status));
 
-        Assert.Equal(Outcome.Ok, _service.SetStatuses(new IssueStatusRequest(issues, "Investigating"), _admin.Id).Outcome);
+        Assert.Equal(Outcome.Ok, _service.SetStatuses(new IssueStatusRequest(issues, "investigating"), _admin.Id).Outcome);
         Assert.All(issues, i =>
         {
             Assert.Equal(IssueStatus.Investigating, _store.GetIssue(i)!.Status);
             Assert.Equal("status changed", _store.GetIssueEvents(i)[^1].Kind);
         });
-        Assert.Equal("status-not-allowed", _service.SetStatuses(new IssueStatusRequest(issues, "ReplacedVerify"), _admin.Id).Code);
+        Assert.Equal("status-not-allowed", _service.SetStatuses(new IssueStatusRequest(issues, "replaced-verify"), _admin.Id).Code);
     }
 
     [Fact]

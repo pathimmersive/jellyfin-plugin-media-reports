@@ -16,6 +16,7 @@ namespace Jellyfin.Plugin.MediaReports.Api;
 /// The admin's endpoints for working issues. Only Jellyfin administrators reach them.
 /// </summary>
 [ApiController]
+[ApiErrors]
 [Authorize(Policy = Policies.RequiresElevation)]
 [Route("MediaReports/Admin")]
 public sealed class AdminController : ControllerBase

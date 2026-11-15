@@ -268,7 +268,7 @@ public sealed class AdminService
             Line = line,
             ReasonCode = issue.ReasonCode,
             ReasonLabel = Label(reasons, issue.ReasonCode),
-            Status = issue.Status.ToString(),
+            Status = issue.Status.AdminCode(),
             StatusLabel = issue.Status.DisplayName(),
             Notes = issue.AdminNotes,
             CreatedAt = issue.CreatedAt,
@@ -524,7 +524,7 @@ public sealed class AdminService
         Clients = reports.Select(r => r.Client).OfType<string>().Distinct(StringComparer.Ordinal).ToList(),
         PlayMethods = reports.Where(r => r.PlayMethod is not null).GroupBy(r => r.PlayMethod!)
             .Select(g => new PlayMethodCount(g.Key, g.Count())).OrderByDescending(m => m.Count).ToList(),
-        Status = issue.Status.ToString(),
+        Status = issue.Status.AdminCode(),
         StatusLabel = issue.Status.DisplayName(),
         LastReport = reports.Max(r => r.CreatedAt),
         IsNew = IsNew(reports, seen),
@@ -560,7 +560,7 @@ public sealed class AdminService
                 Clients = children.SelectMany(c => c.Clients).Distinct(StringComparer.Ordinal).ToList(),
                 PlayMethods = children.SelectMany(c => c.PlayMethods).GroupBy(m => m.Method)
                     .Select(g => new PlayMethodCount(g.Key, g.Sum(m => m.Count))).OrderByDescending(m => m.Count).ToList(),
-                Status = statuses.Count == 1 ? statuses[0] : "Mixed",
+                Status = statuses.Count == 1 ? statuses[0] : "mixed",
                 StatusLabel = statuses.Count == 1 ? first.StatusLabel : "Mixed",
                 LastReport = children.Max(c => c.LastReport),
                 IsNew = children.Any(c => c.IsNew),
@@ -582,7 +582,8 @@ public sealed class AdminService
         _ => rows.OrderByDescending(r => r.LastReport).ThenByDescending(r => r.IssueId),
     };
 
-    private static int StatusOrder(string status) => Enum.TryParse<IssueStatus>(status, out var s) ? (int)s : (int)IssueStatus.Investigating;
+    private static int StatusOrder(string status) =>
+        Enum.GetValues<IssueStatus>().Where(s => s.AdminCode() == status).Select(s => (int)s).DefaultIfEmpty((int)IssueStatus.Investigating).First();
 
     private static bool IsNew(IReadOnlyList<StoredReport> reports, DateTimeOffset? seen) =>
         seen is not { } at || reports.Any(r => r.CreatedAt > at);
@@ -594,11 +595,10 @@ public sealed class AdminService
     private static JsonElement? Snapshot(StoredReport report) =>
         report.SnapshotJson is null ? null : JsonDocument.Parse(report.SnapshotJson).RootElement.Clone();
 
-    // Only the names the admin may set; Replaced – verify is the plugin's own.
+    // Only the codes the admin may set; replaced-verify is the plugin's own.
     private static IssueStatus? ParseStatus(string status) =>
-        Enum.GetNames<IssueStatus>().Contains(status, StringComparer.Ordinal) && Enum.Parse<IssueStatus>(status) is var parsed && parsed != IssueStatus.ReplacedVerify
-            ? parsed
-            : null;
+        Enum.GetValues<IssueStatus>().Where(s => s != IssueStatus.ReplacedVerify).Cast<IssueStatus?>()
+            .FirstOrDefault(s => string.Equals(s!.Value.AdminCode(), status, StringComparison.Ordinal));
 
     private static string Label(IEnumerable<ReasonEntry> reasons, string code) =>
         reasons.FirstOrDefault(r => string.Equals(r.Code, code, StringComparison.Ordinal))?.Label ?? code;

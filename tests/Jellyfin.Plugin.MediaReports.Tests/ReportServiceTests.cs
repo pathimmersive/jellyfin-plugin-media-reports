@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Threading;
+using System.Threading.Tasks;
 using Jellyfin.Database.Implementations.Entities;
 using Jellyfin.Plugin.MediaReports.Api;
 using Jellyfin.Plugin.MediaReports.Configuration;
@@ -29,6 +30,7 @@ public sealed class ReportServiceTests : IDisposable
     private static readonly Guid SeriesId = Guid.NewGuid();
     private static readonly Guid EpisodeId = Guid.NewGuid();
     private static readonly Guid HiddenId = Guid.NewGuid();
+    private static readonly Guid SongId = Guid.NewGuid();
 
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "media-reports-tests", Guid.NewGuid().ToString("N"));
     private readonly ManualClock _clock = new();
@@ -67,6 +69,7 @@ public sealed class ReportServiceTests : IDisposable
             _library.Setup(m => m.GetItemById<BaseItem>(MovieId, user)).Returns(movie);
             _library.Setup(m => m.GetItemById<BaseItem>(SeriesId, user)).Returns(series);
             _library.Setup(m => m.GetItemById<BaseItem>(EpisodeId, user)).Returns(episode);
+            _library.Setup(m => m.GetItemById<BaseItem>(SongId, user)).Returns(new MediaBrowser.Controller.Entities.Audio.Audio { Id = SongId, Name = "Test Song" });
         }
 
         _library.Setup(m => m.GetItemById(SeriesId)).Returns(series);
@@ -147,7 +150,7 @@ public sealed class ReportServiceTests : IDisposable
         var open = Assert.Single(context.OpenReports);
         Assert.Equal("stutter", open.ReasonCode);
         Assert.Equal("Stutter or jitter", open.ReasonLabel);
-        Assert.Equal("New", open.Status);
+        Assert.Equal("new", open.Status);
     }
 
     [Fact]
@@ -160,7 +163,7 @@ public sealed class ReportServiceTests : IDisposable
         var second = Ok(_service.File(_bob.Id, null, new FileReportRequest(MovieId, "stutter", null)));
 
         Assert.Equal(first.IssueId, second.IssueId);
-        Assert.Equal("New", first.Status);
+        Assert.Equal("new", first.Status);
         var stored = _store.GetReport(first.Id)!;
         Assert.Equal("keeps jumping back", stored.Note);
         Assert.Equal("alice", stored.ReporterName);
@@ -225,6 +228,132 @@ public sealed class ReportServiceTests : IDisposable
     }
 
     [Fact]
+    public void ATitleOfAnotherType_IsRefusedAsNotReportable_AndNothingIsStored()
+    {
+        AssertRefused(_service.GetContext(_alice.Id, null, SongId), Outcome.BadRequest, "item-not-reportable");
+        AssertRefused(_service.File(_alice.Id, null, new FileReportRequest(SongId, "audio", null)), Outcome.BadRequest, "item-not-reportable");
+        AssertRefused(_service.File(_alice.Id, null, new FileReportRequest(HiddenId, "audio", null)), Outcome.NotFound, "item-not-found");
+        Assert.Equal(0, _store.GetReportCount());
+        Assert.Equal(["Movie", "Episode", "Season", "Series"], ReportService.ReportableTypes);
+    }
+
+    [Fact]
+    public void OpeningAReport_LeavesItUnread_UntilSeenIsCalled()
+    {
+        var filed = Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)));
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        _store.SetStatus(filed.IssueId, IssueStatus.Fixed, null);
+        Assert.Equal(1, Ok(_service.Mine(_alice.Id)).Unread);
+
+        Ok(_service.MineDetail(_alice.Id, filed.Id));
+        Assert.Equal(1, Ok(_service.Mine(_alice.Id)).Unread);
+
+        Assert.Equal(Outcome.Ok, _service.MarkSeen(_alice.Id, filed.Id).Outcome);
+        Assert.Equal(0, Ok(_service.Mine(_alice.Id)).Unread);
+        AssertRefused(_service.MarkSeen(_bob.Id, filed.Id), Outcome.NotFound, "report-not-found");
+    }
+
+    [Fact]
+    public void File_InParallel_StoresOneReportPerItemAndReason()
+    {
+        var results = FileInParallel(20, _ => new FileReportRequest(MovieId, "stutter", null));
+
+        Assert.Equal(1, results.Count(r => r.Outcome == Outcome.Ok));
+        Assert.All(results.Where(r => r.Outcome != Outcome.Ok), r => Assert.Equal("already-reported", r.Code));
+        Assert.Equal(1, _store.GetReportCount());
+    }
+
+    [Fact]
+    public void File_InParallel_NeverPassesTheHourlyLimit()
+    {
+        for (var i = 0; i < ReportService.MaxReportsPerHour - 1; i++)
+        {
+            var filed = Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)));
+            Assert.Equal(Outcome.Ok, _service.Withdraw(_alice.Id, filed.Id).Outcome);
+        }
+
+        var reasons = PluginConfiguration.DefaultReasons().Select(r => r.Code).ToArray();
+        var results = FileInParallel(reasons.Length, n => new FileReportRequest(MovieId, reasons[n], null));
+
+        Assert.Equal(1, results.Count(r => r.Outcome == Outcome.Ok));
+        Assert.All(results.Where(r => r.Outcome != Outcome.Ok), r => Assert.Equal("too-many-reports", r.Code));
+    }
+
+    [Fact]
+    public async Task FileAsync_WaitsForTheUsersGate_WithoutHoldingAThread()
+    {
+        var gate = _service.FilingGate(_alice.Id);
+        gate.Wait();
+        var calls = Task.Run(() => Enumerable.Range(0, 200)
+            .Select(_ => _service.FileAsync(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)))
+            .ToList());
+
+        Assert.True(calls.Wait(TimeSpan.FromSeconds(5)), "a filing held its caller's thread while the gate was taken");
+        Assert.All(calls.Result, t => Assert.False(t.IsCompleted));
+        gate.Release();
+        var results = await Task.WhenAll(calls.Result);
+
+        Assert.Equal(1, results.Count(r => r.Outcome == Outcome.Ok));
+    }
+
+    [Fact]
+    public void FileAsync_RefusesAUserAtTheLimit_WithoutWaitingForTheGate()
+    {
+        for (var i = 0; i < ReportService.MaxReportsPerHour; i++)
+        {
+            var filed = Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)));
+            Assert.Equal(Outcome.Ok, _service.Withdraw(_alice.Id, filed.Id).Outcome);
+        }
+
+        var gate = _service.FilingGate(_alice.Id);
+        gate.Wait();
+        try
+        {
+            var call = Task.Factory.StartNew(() => _service.FileAsync(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)), CancellationToken.None, TaskCreationOptions.None, TaskScheduler.Default);
+            Assert.True(call.Wait(TimeSpan.FromSeconds(5)) && call.Result.IsCompleted, "a filing past the limit waited for the gate");
+            AssertRefused(call.Result.Result, Outcome.TooManyRequests, "too-many-reports");
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private List<ServiceResult<FiledReportView>> FileInParallel(int count, Func<int, FileReportRequest> request)
+    {
+        using var start = new Barrier(count);
+        var tasks = Enumerable.Range(0, count).Select(n => Task.Run(() =>
+        {
+            start.SignalAndWait();
+            return _service.File(_alice.Id, null, request(n));
+        })).ToArray();
+        Task.WaitAll(tasks);
+        return tasks.Select(t => t.Result).ToList();
+    }
+
+    [Fact]
+    public void File_RefusesThe31stReportInAnHour_CountingWithdrawnOnes_AndAlertsNothing()
+    {
+        var alerted = 0;
+        var service = new ReportService(_library.Object, _users.Object, _capture, _store, () => _config, _clock, _ => alerted++);
+        var first = _clock.GetUtcNow();
+        for (var i = 0; i < ReportService.MaxReportsPerHour; i++)
+        {
+            var filed = Ok(service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)));
+            Assert.Equal(Outcome.Ok, service.Withdraw(_alice.Id, filed.Id).Outcome);
+            _clock.Advance(TimeSpan.FromMinutes(1));
+        }
+
+        AssertRefused(service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)), Outcome.TooManyRequests, "too-many-reports");
+        Assert.Equal(0, _store.GetReportCount());
+        Assert.Equal(ReportService.MaxReportsPerHour, alerted);
+        Ok(service.File(_bob.Id, null, new FileReportRequest(MovieId, "stutter", null)));
+
+        _clock.Advance(first + TimeSpan.FromHours(1) - _clock.GetUtcNow());
+        Ok(service.File(_alice.Id, null, new FileReportRequest(MovieId, "audio", null)));
+    }
+
+    [Fact]
     public void ReportingOff_RefusesContextAndFiling_AndOnAgainWorksWithoutRestart()
     {
         _config.ReportingEnabled = false;
@@ -273,7 +402,42 @@ public sealed class ReportServiceTests : IDisposable
     }
 
     [Fact]
-    public void Mine_MarksAReportUnreadWhenItsStatusChanges_AndReadingItClearsTheMark()
+    public void ReporterEndpoints_GiveReplacedVerifyAsInvestigating_NeverTheStorageName()
+    {
+        var filed = Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)));
+        _store.SetStatus(filed.IssueId, IssueStatus.ReplacedVerify, null);
+
+        var row = Ok(_service.Mine(_alice.Id)).Reports[0];
+        var detail = Ok(_service.MineDetail(_alice.Id, filed.Id));
+        var open = Ok(_service.GetContext(_alice.Id, null, MovieId)).OpenReports[0];
+
+        Assert.Equal(("investigating", "investigating", "investigating"), (row.Status, detail.Status, open.Status));
+        Assert.Equal("Being looked at", row.StatusLabel);
+    }
+
+    [Fact]
+    public void StatusCode_MapsEveryStatusIntoTheDocumentedSet()
+    {
+        var expected = new Dictionary<IssueStatus, string>
+        {
+            [IssueStatus.New] = "new",
+            [IssueStatus.Investigating] = "investigating",
+            [IssueStatus.ReplacedVerify] = "investigating",
+            [IssueStatus.Fixed] = "fixed",
+            [IssueStatus.WontFix] = "wont-fix",
+            [IssueStatus.Duplicate] = "duplicate",
+            [IssueStatus.CantReproduce] = "cant-reproduce",
+        };
+
+        Assert.Equal(Enum.GetValues<IssueStatus>(), expected.Keys);
+        foreach (var (status, code) in expected)
+        {
+            Assert.Equal(code, ReporterText.StatusCode(status));
+        }
+    }
+
+    [Fact]
+    public void Mine_MarksAReportUnreadWhenItsStatusChanges_AndSeenClearsTheMark()
     {
         var filed = Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)));
         Assert.Equal(0, Ok(_service.Mine(_alice.Id)).Unread);
@@ -284,7 +448,7 @@ public sealed class ReportServiceTests : IDisposable
         Assert.Equal((1, true, "Fixed"), (mine.Unread, mine.Reports[0].Unread, mine.Reports[0].StatusLabel));
 
         _clock.Advance(TimeSpan.FromMinutes(1));
-        Ok(_service.MineDetail(_alice.Id, filed.Id));
+        Assert.Equal(Outcome.Ok, _service.MarkSeen(_alice.Id, filed.Id).Outcome);
         mine = Ok(_service.Mine(_alice.Id));
         Assert.Equal((0, false), (mine.Unread, mine.Reports[0].Unread));
     }
@@ -302,8 +466,11 @@ public sealed class ReportServiceTests : IDisposable
         var detail = Ok(_service.MineDetail(_alice.Id, filed.Id));
 
         Assert.Equal(("Stutter or jitter", "Jumps back every few seconds", "Living Room TV"), (detail.ReasonLabel, detail.Note, detail.Device));
-        Assert.Equal(("WontFix", "Won't fix", false), (detail.Status, detail.StatusLabel, detail.CanWithdraw));
+        Assert.Equal(("wont-fix", "Won't fix", false), (detail.Status, detail.StatusLabel, detail.CanWithdraw));
         Assert.Equal(["Reported", "Being looked at", "Won't fix"], detail.History.Select(h => h.Label));
+        Assert.Equal([null, "investigating", "wont-fix"], detail.History.Select(h => h.Status));
+        Assert.Equal("stutter", detail.ReasonCode);
+        Assert.Equal("stutter", Ok(_service.Mine(_alice.Id)).Reports[0].ReasonCode);
         var json = JsonSerializer.Serialize(detail);
         Assert.DoesNotContain("Secret", json, StringComparison.Ordinal);
         Assert.DoesNotContain("Resolution", json, StringComparison.Ordinal);

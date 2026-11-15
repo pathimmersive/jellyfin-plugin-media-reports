@@ -1,7 +1,10 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Jellyfin.Plugin.MediaReports.Configuration;
 using Jellyfin.Plugin.MediaReports.Playback;
 using Jellyfin.Plugin.MediaReports.Storage;
@@ -23,6 +26,16 @@ public sealed class ReportService
     /// </summary>
     public const int MaxNoteLength = 1000;
 
+    /// <summary>
+    /// The most reports one user can file in an hour.
+    /// </summary>
+    public const int MaxReportsPerHour = 30;
+
+    /// <summary>
+    /// The item types a report can be filed on.
+    /// </summary>
+    public static readonly IReadOnlyList<string> ReportableTypes = ["Movie", "Episode", "Season", "Series"];
+
     private readonly ILibraryManager _library;
     private readonly IUserManager _users;
     private readonly PlaybackCapture _capture;
@@ -30,6 +43,11 @@ public sealed class ReportService
     private readonly Func<PluginConfiguration> _config;
     private readonly TimeProvider _time;
     private readonly Action<StoredReport>? _filed;
+    private readonly Dictionary<Guid, Queue<DateTimeOffset>> _recentFilings = [];
+
+    // One user's filings run one at a time, so parallel requests can't pass the hourly limit
+    // or the open-report check between the check and the insert.
+    private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _filingGates = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ReportService"/> class.
@@ -73,6 +91,11 @@ public sealed class ReportService
             return NotFound<ReportContext>();
         }
 
+        if (!IsReportable(item))
+        {
+            return NotReportable<ReportContext>();
+        }
+
         var reasons = config.GetReasons();
         var playback = PickPlayback(userId, deviceId, item);
         return ServiceResult<ReportContext>.Success(new ReportContext
@@ -82,7 +105,7 @@ public sealed class ReportService
             Type = TypeName(item),
             Reasons = reasons.Where(r => !r.Retired).Select(r => new ReasonOption(r.Code, r.Label)).ToList(),
             OpenReports = _store.GetOpenReports(userId, item.Id)
-                .Select(r => new OpenReport(r.ReportId, r.ReasonCode, Label(reasons, r.ReasonCode), r.Status.ToString()))
+                .Select(r => new OpenReport(r.ReportId, r.ReasonCode, Label(reasons, r.ReasonCode), ReporterText.StatusCode(r.Status)))
                 .ToList(),
             Playback = Describe(playback),
         });
@@ -94,8 +117,46 @@ public sealed class ReportService
     /// <param name="userId">The caller.</param>
     /// <param name="deviceId">The caller's device.</param>
     /// <param name="request">The report.</param>
+    /// <param name="cancellationToken">Stops the wait for the user's gate.</param>
     /// <returns>The filed report, or a refusal.</returns>
-    public ServiceResult<FiledReportView> File(Guid userId, string? deviceId, FileReportRequest request)
+    public async Task<ServiceResult<FiledReportView>> FileAsync(Guid userId, string? deviceId, FileReportRequest request, CancellationToken cancellationToken = default)
+    {
+        // A user already at the limit is refused at once, so a flood never queues at the gate.
+        if (RecentFilings(userId) >= MaxReportsPerHour)
+        {
+            return TooManyReports();
+        }
+
+        var gate = FilingGate(userId);
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return FileOne(userId, deviceId, request);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Files a report and waits for the answer; for tests.
+    /// </summary>
+    /// <param name="userId">The caller.</param>
+    /// <param name="deviceId">The caller's device.</param>
+    /// <param name="request">The report.</param>
+    /// <returns>The filed report, or a refusal.</returns>
+    internal ServiceResult<FiledReportView> File(Guid userId, string? deviceId, FileReportRequest request) =>
+        FileAsync(userId, deviceId, request).GetAwaiter().GetResult();
+
+    /// <summary>
+    /// Gets the gate one user's filings pass through one at a time.
+    /// </summary>
+    /// <param name="userId">The user.</param>
+    /// <returns>The gate.</returns>
+    internal SemaphoreSlim FilingGate(Guid userId) => _filingGates.GetOrAdd(userId, _ => new SemaphoreSlim(1, 1));
+
+    private ServiceResult<FiledReportView> FileOne(Guid userId, string? deviceId, FileReportRequest request)
     {
         var config = _config();
         if (!config.ReportingEnabled)
@@ -103,10 +164,20 @@ public sealed class ReportService
             return ReportingOff<FiledReportView>();
         }
 
+        if (RecentFilings(userId) >= MaxReportsPerHour)
+        {
+            return TooManyReports();
+        }
+
         var item = FindItem(userId, request.ItemId);
         if (item is null)
         {
             return NotFound<FiledReportView>();
+        }
+
+        if (!IsReportable(item))
+        {
+            return NotReportable<FiledReportView>();
         }
 
         if (!config.GetReasons().Any(r => !r.Retired && string.Equals(r.Code, request.ReasonCode, StringComparison.Ordinal)))
@@ -162,6 +233,7 @@ public sealed class ReportService
             Snapshot = playback is null ? null : ReportSnapshot.FromPlayback(playback),
         });
 
+        RememberFiling(userId);
         _filed?.Invoke(_store.GetReport(filed.ReportId)!);
         var issue = _store.GetIssue(filed.IssueId)!;
         return ServiceResult<FiledReportView>.Success(new FiledReportView
@@ -170,7 +242,7 @@ public sealed class ReportService
             IssueId = filed.IssueId,
             ItemId = item.Id,
             ReasonCode = request.ReasonCode,
-            Status = issue.Status.ToString(),
+            Status = ReporterText.StatusCode(issue.Status),
             CreatedAt = _time.GetUtcNow(),
             Playback = Describe(playback),
         });
@@ -196,9 +268,10 @@ public sealed class ReportService
                 Id = r.Report.Id,
                 ItemId = r.Report.ItemId,
                 Title = ReporterText.Title(r.Report),
+                ReasonCode = r.Report.ReasonCode,
                 ReasonLabel = Label(reasons, r.Report.ReasonCode),
                 CreatedAt = r.Report.CreatedAt,
-                Status = r.Status.ToString(),
+                Status = ReporterText.StatusCode(r.Status),
                 StatusLabel = ReporterText.StatusLabel(r.Status),
                 Unread = r.Unread,
                 ExpiresAt = expires,
@@ -208,6 +281,23 @@ public sealed class ReportService
             };
         }).ToList();
         return ServiceResult<MyReports>.Success(new MyReports { Reports = rows, Unread = rows.Count(r => r.Unread) });
+    }
+
+    /// <summary>
+    /// Records that the caller has seen their report's current status.
+    /// </summary>
+    /// <param name="userId">The caller.</param>
+    /// <param name="reportId">The report.</param>
+    /// <returns>Success, or a refusal.</returns>
+    public ServiceResult<bool> MarkSeen(Guid userId, long reportId)
+    {
+        if (!_store.GetReporterReports(userId).Any(r => r.Report.Id == reportId))
+        {
+            return ReportNotFound<bool>();
+        }
+
+        _store.MarkReporterSeen(reportId);
+        return ServiceResult<bool>.Success(true);
     }
 
     /// <summary>
@@ -232,7 +322,7 @@ public sealed class ReportService
         => ServiceResult<HiddenReports>.Success(new HiddenReports { Hidden = _store.HideClosedFromReporter(userId) });
 
     /// <summary>
-    /// Opens one of the caller's reports and records that they have seen its current status.
+    /// Opens one of the caller's reports. Reading it changes nothing; <see cref="MarkSeen"/> clears the unread mark.
     /// </summary>
     /// <param name="userId">The caller.</param>
     /// <param name="reportId">The report.</param>
@@ -250,21 +340,21 @@ public sealed class ReportService
             .Where(e => e.Kind == "status changed" && e.At >= report.CreatedAt)
             .Select(e => (e.At, Status: ReporterText.StatusChangedTo(e.Detail)))
             .Where(e => e.Status is not null)
-            .Select(e => new MyReportStep(e.At, ReporterText.StatusLabel(e.Status!.Value)));
-        _store.MarkReporterSeen(report.Id);
+            .Select(e => new MyReportStep(e.At, ReporterText.StatusLabel(e.Status!.Value), ReporterText.StatusCode(e.Status!.Value)));
         return ServiceResult<MyReportDetail>.Success(new MyReportDetail
         {
             Id = report.Id,
             ItemId = report.ItemId,
             Title = ReporterText.Title(report),
+            ReasonCode = report.ReasonCode,
             ReasonLabel = Label(_config().GetReasons(), report.ReasonCode),
             Note = report.Note,
             Device = report.Device,
             CreatedAt = report.CreatedAt,
-            Status = mine.Status.ToString(),
+            Status = ReporterText.StatusCode(mine.Status),
             StatusLabel = ReporterText.StatusLabel(mine.Status),
             CanWithdraw = mine.Status == IssueStatus.New,
-            History = [new MyReportStep(report.CreatedAt, "Reported"), .. changes],
+            History = [new MyReportStep(report.CreatedAt, "Reported", null), .. changes],
         });
     }
 
@@ -297,9 +387,10 @@ public sealed class ReportService
             return null;
         }
 
-        var item = _library.GetItemById<BaseItem>(itemId, user);
-        return item is Movie or Episode or Season or Series ? item : null;
+        return _library.GetItemById<BaseItem>(itemId, user);
     }
+
+    private static bool IsReportable(BaseItem item) => item is Movie or Episode or Season or Series;
 
     // A movie or episode carries the caller's live playback of it, preferring the calling
     // device, else their newest buffered one; a season or series carries none.
@@ -337,6 +428,50 @@ public sealed class ReportService
     private static ServiceResult<T> NotFound<T>() =>
         ServiceResult<T>.Refuse(Outcome.NotFound, "item-not-found", "That title isn't in your library.");
 
+    private static ServiceResult<FiledReportView> TooManyReports() =>
+        ServiceResult<FiledReportView>.Refuse(Outcome.TooManyRequests, "too-many-reports", $"You've sent {MaxReportsPerHour} reports in the past hour. Try again later.");
+
+    private static ServiceResult<T> NotReportable<T>() =>
+        ServiceResult<T>.Refuse(Outcome.BadRequest, "item-not-reportable", "Reports can be filed on movies, episodes, seasons and series only.");
+
     private static ServiceResult<T> ReportNotFound<T>() =>
         ServiceResult<T>.Refuse(Outcome.NotFound, "report-not-found", "You have no report with that id.");
+
+    private int RecentFilings(Guid userId)
+    {
+        lock (_recentFilings)
+        {
+            if (!_recentFilings.TryGetValue(userId, out var times))
+            {
+                return 0;
+            }
+
+            var cutoff = _time.GetUtcNow() - TimeSpan.FromHours(1);
+            while (times.Count > 0 && times.Peek() <= cutoff)
+            {
+                times.Dequeue();
+            }
+
+            if (times.Count == 0)
+            {
+                _recentFilings.Remove(userId);
+            }
+
+            return times.Count;
+        }
+    }
+
+    private void RememberFiling(Guid userId)
+    {
+        lock (_recentFilings)
+        {
+            if (!_recentFilings.TryGetValue(userId, out var times))
+            {
+                times = new Queue<DateTimeOffset>();
+                _recentFilings[userId] = times;
+            }
+
+            times.Enqueue(_time.GetUtcNow());
+        }
+    }
 }

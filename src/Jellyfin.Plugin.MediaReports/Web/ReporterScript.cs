@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
+using Jellyfin.Plugin.MediaReports.Api;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -54,6 +55,7 @@ public class ReporterScript
 /// Serves the Report button script that jellyfin-web loads.
 /// </summary>
 [ApiController]
+[ApiErrors]
 [Route("MediaReports/web")]
 public sealed class ReporterScriptController : ControllerBase
 {

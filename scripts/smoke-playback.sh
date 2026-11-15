@@ -218,13 +218,16 @@ def check(label, entries, state):
           f"device={get(e,'DeviceName')} method={get(e,'PlayMethod')} position={get(e,'PositionTicks')} "
           f"reasons={get(e,'Transcoding','TranscodeReasons')} hw={get(e,'Transcoding','HardwareAccelerationType')} "
           f"streams={[get(s,'Type') for s in get(e,'SourceStreams') or []]}")
-    if str(get(e, "State")) not in (state, {"Playing": "0", "Stopped": "1"}[state]):
+    if get(e, "State") != state:
         problems.append(f"{label}: state is {get(e, 'State')}, expected {state}")
     for path in [("Client",), ("ClientVersion",), ("DeviceName",), ("PositionTicks",),
                  ("Transcoding", "TranscodeReasons"), ("Transcoding", "VideoCodec"),
                  ("Transcoding", "AudioCodec"), ("Transcoding", "HardwareAccelerationType")]:
         if get(e, *path) in (None, "", [], 0):
             problems.append(f"{label}: {'/'.join(path)} is missing")
+    for hidden in ("SessionId", "UserId", "DeviceId", "MediaSourceId"):
+        if get(e, hidden) is not None:
+            problems.append(f"{label}: the answer carries {hidden}")
     if get(e, "PlayMethod") != "Transcode":
         problems.append(f"{label}: play method is {get(e, 'PlayMethod')}, expected Transcode")
     types = {get(s, "Type") for s in get(e, "SourceStreams") or []}

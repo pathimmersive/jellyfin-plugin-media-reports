@@ -5,7 +5,8 @@
 # filed within a minute arrive as one Discord and one generic message with the expected
 # fields and nothing private, each report is in Jellyfin's activity log, no webhook sends
 # nothing, a failing webhook is retried once after 30 seconds, and the test alert says per
-# address whether it was accepted.
+# address whether it was accepted. Last, twelve reports with long notes in one minute arrive
+# in Discord messages within its limits, with Markdown in the notes shown as written.
 #
 # Usage: scripts/smoke-alerts.sh
 #
@@ -210,7 +211,7 @@ assert 45 <= waited <= 80, waited
 assert h['type'].startswith('application/json'), h['type']
 assert body['username'] == 'Media Reports' and body['content'] == '3 new reports', body['content']
 e = body['embeds']
-assert [x['title'] for x in e] == ['$movie_name', 'Test Series S01E01', 'Test Series S01E02'], [x['title'] for x in e]
+assert [x['title'].replace(chr(92), '') for x in e] == ['$movie_name', 'Test Series S01E01', 'Test Series S01E02'], [x['title'] for x in e]
 f = {x['name']: x['value'] for x in e[0]['fields']}
 assert f['Reason'] == 'Stutter or jitter' and f['Reported by'] == 'alice' and 'Living Room TV' in f['Device'], f
 assert f['How it played'] in ('Direct play', 'Direct stream') or f['How it played'].startswith('Transcode'), f
@@ -273,5 +274,36 @@ hits /discord | json "d[-1]['body']" | grep -q "Sample Movie (2026)" || fail "th
 ok "admin box" "$admin" GET /MediaReports/Admin/Settings | json "(d['DiscordWebhookUrl'], d['WebhookUrl'])" | grep -x "('', '$hook/broken')" >/dev/null \
   || fail "the test alert changed the settings"
 echo "test alert: Discord accepted, the other address failed with 404, settings unchanged"
+
+echo "== twelve reports in a minute: every one arrives, within Discord's limits, Markdown shown as written"
+settings "{\"DiscordWebhookUrl\":\"$hook/discord\",\"WebhookUrl\":\"\"}"
+before="$(count /discord)"
+md_note="$(printf 'Look at [text](https://example.com) and **this**. %.0s' {1..7})"
+filed=0
+for item in "$movie" "${episodes[@]}"; do
+  for reason in wont-play poor-quality playback-error; do
+    (( filed < 12 )) || break 2
+    file "Living Room TV" "$alice" "$item" "$reason" "$md_note"
+    filed=$((filed + 1))
+  done
+done
+wait_hits /discord $((before + 2)) 90
+sleep 5
+hits /discord >"$work/results/discord-big.json"
+check "$work/results/discord-big.json" "
+bodies = [json.loads(h['body']) for h in d[$before:]]
+assert len(bodies) == 2, len(bodies)
+total = 0
+for b in bodies:
+    e = b['embeds']
+    assert 1 <= len(e) <= 10, len(e)
+    chars = sum(len(x['title']) + len(x.get('description', '')) + sum(len(f['name']) + len(f['value']) for f in x['fields']) for x in e)
+    assert chars <= 6000, chars
+    assert all(chr(92) + '[text' + chr(92) + '](https://example.com)' in x['description'] for x in e), e[0]['description']
+    total += len(e)
+assert total == 12, total
+assert [b['content'] for b in bodies] == ['12 new reports (1 of 2)', '12 new reports (2 of 2)'], [b['content'] for b in bodies]
+" "the twelve reports did not arrive in Discord messages within its limits"
+echo "twelve reports arrived in two Discord messages (10 and 2), each within 6,000 characters, links shown as text"
 
 echo "PASS: report alerts on $image"

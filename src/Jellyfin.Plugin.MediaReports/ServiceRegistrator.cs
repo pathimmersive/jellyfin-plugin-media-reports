@@ -29,7 +29,8 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
     {
         serviceCollection.AddSingleton(provider => new PlaybackCapture(
             provider.GetRequiredService<MediaBrowser.Controller.Session.ISessionManager>(),
-            provider.GetRequiredService<MediaBrowser.Controller.Library.ILibraryManager>())
+            provider.GetRequiredService<MediaBrowser.Controller.Library.ILibraryManager>(),
+            provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<PlaybackCapture>>())
         {
             Samples = sample => provider.GetRequiredService<SuspectWatcher>().Queue(sample),
         });

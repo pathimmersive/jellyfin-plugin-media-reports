@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using System.IO;
 using MediaBrowser.Common.Api;
+using Jellyfin.Plugin.MediaReports.Api;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -12,6 +13,7 @@ namespace Jellyfin.Plugin.MediaReports.Storage;
 /// Serves the admin's download of every stored report.
 /// </summary>
 [ApiController]
+[ApiErrors]
 [Authorize(Policy = Policies.RequiresElevation)]
 [Route("MediaReports/Admin")]
 public sealed class ExportController : ControllerBase
@@ -44,7 +46,7 @@ public sealed class ExportController : ControllerBase
         catch (StorageUnavailableException)
         {
             output.Dispose();
-            return Problem(title: "storage-unavailable", statusCode: StatusCodes.Status503ServiceUnavailable);
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new ApiError("storage-unavailable", "Reports can't be read right now."));
         }
 
         output.Position = 0;

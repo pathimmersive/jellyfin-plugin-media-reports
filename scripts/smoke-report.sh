@@ -4,7 +4,8 @@
 # "phone" and from a second user. Checks the context the API describes, the playback it
 # attaches, grouping into one issue, every refusal, retired reasons and the reporting switch.
 # Then lists, opens and withdraws the users' own reports, closes an issue as the admin, and
-# reads the notice that arrives on the reporter's websocket.
+# reads the notice that arrives on the reporter's websocket. Last, checks a user's 31st report
+# in an hour is refused and that the load signal records the caller's own app.
 #
 # Usage: scripts/smoke-report.sh [--without-plugin]
 #   --without-plugin  start the server with no plugin; the script must fail
@@ -117,6 +118,11 @@ expect() {
   if [[ -n "$code_want" ]]; then
     [[ "$(json "d.get('code') or d.get('Code')" <"$work/results/last.json")" == "$code_want" ]] || fail "$3 $4 did not say $code_want: $(cat "$work/results/last.json")"
   fi
+  # Every refusal carries the error body: a code and a message.
+  if (( want >= 400 )); then
+    json "bool((d.get('Code') or d.get('code')) and (d.get('Message') or d.get('message')))" <"$work/results/last.json" 2>/dev/null | grep -x True >/dev/null \
+      || fail "$3 $4 answered $got without a Code and Message: $(cat "$work/results/last.json")"
+  fi
   echo "$3 $4 -> $got ${code_want}"
 }
 
@@ -154,13 +160,37 @@ ok "Living Room TV" "$alice_tv" POST /Sessions/Playing/Progress "$(state 1000000
 ok "Living Room TV" "$alice_tv" POST /Sessions/Playing/Stopped "$(state 200000000)" >/dev/null
 
 echo "== access"
-expect 401 "" "" "" GET "/MediaReports/Report/Context?itemId=$item_id"
-expect 401 "" "" "" GET /MediaReports/Report/Mine
-expect 401 "" "" "" GET /MediaReports/Report/Mine/1
-expect 401 "" "" "" DELETE /MediaReports/Report/Mine/1
-expect 401 "" "" "" POST /MediaReports/Report/Mine/1/Hide
-expect 401 "" "" "" POST /MediaReports/Report/Mine/HideClosed
+expect 401 unauthorized "" "" GET "/MediaReports/Report/Context?itemId=$item_id"
+expect 401 unauthorized "" "" GET /MediaReports/Report/Mine
+expect 401 unauthorized "" "" GET /MediaReports/Report/Mine/1
+expect 401 unauthorized "" "" DELETE /MediaReports/Report/Mine/1
+expect 401 unauthorized "" "" POST /MediaReports/Report/Mine/1/Hide
+expect 401 unauthorized "" "" POST /MediaReports/Report/Mine/HideClosed
+expect 401 unauthorized "" "" GET /MediaReports/Info
+expect 403 forbidden "Alice Phone" "$alice_phone" GET /MediaReports/Admin/Summary
+expect 404 not-found "Alice Phone" "$alice_phone" GET /MediaReports/Nothing/Here
+expect 400 bad-request "Alice Phone" "$alice_phone" POST /MediaReports/Report '{"itemId": '
+expect 400 bad-request "Alice Phone" "$alice_phone" GET /MediaReports/Report/Mine/not-a-number
+
+echo "== Info tells a signed-in user the plugin is installed"
+ok "Alice Phone" "$alice_phone" GET /MediaReports/Info | py -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d["ApiVersion"] == 1 and d["Version"].count(".") == 3 and d["ReportingEnabled"] is True, d
+assert d["ReportableTypes"] == ["Movie", "Episode", "Season", "Series"], d
+print("Info: version %s, API version 1, reporting on" % d["Version"])' || fail "Info is wrong"
 expect 404 item-not-found "Alice Phone" "$alice_phone" GET "/MediaReports/Report/Context?itemId=$(py -c 'import uuid;print(uuid.uuid4())')"
+
+echo "== error bodies follow Jellyfin's camelCase profile when asked"
+camel='Accept: application/json; profile="CamelCase"'
+for call in "|/MediaReports/Info|unauthorized" \
+  "$(auth "Alice Phone" "$alice_phone")|/MediaReports/Report/Context?itemId=$(py -c 'import uuid;print(uuid.uuid4())')|item-not-found"; do
+  IFS='|' read -r who path code <<<"$call"
+  curl -sS -o "$work/results/camel.json" -H "$camel" ${who:+-H "Authorization: $who"} "$api$path"
+  [[ "$(json "','.join(d.keys()) + ' ' + d['code']" <"$work/results/camel.json")" == "code,message $code" ]] ||
+    fail "GET $path with the camelCase profile answered $(cat "$work/results/camel.json")"
+done
+echo "a 401 from Jellyfin and a refusal from the plugin both read code and message"
 
 echo "== context from alice's phone names the TV playback"
 ok "Alice Phone" "$alice_phone" GET "/MediaReports/Report/Context?itemId=$item_id" >"$work/results/context.json"
@@ -207,6 +237,8 @@ expect 400 reason-not-allowed "Alice Phone" "$alice_phone" POST /MediaReports/Re
 set_config off
 expect 403 reporting-off "Alice Phone" "$alice_phone" POST /MediaReports/Report "{\"itemId\":\"$item_id\",\"reasonCode\":\"audio\"}"
 expect 403 reporting-off "Alice Phone" "$alice_phone" GET "/MediaReports/Report/Context?itemId=$item_id"
+ok "Alice Phone" "$alice_phone" GET /MediaReports/Info | json "d['ReportingEnabled']" | grep -x False >/dev/null \
+  || fail "with reporting off, Info did not say so"
 alice_report="$(json "d['Id']" <"$work/results/alice.json")"
 ok "Alice Phone" "$alice_phone" GET /MediaReports/Report/Mine | json "len(d['Reports'])" | grep -x 1 >/dev/null \
   || fail "with reporting off, Mine did not list alice's report"
@@ -223,7 +255,7 @@ r = sys.argv[1]
 load = lambda n: json.load(open(os.path.join(r, n)))
 alice, bob, after, export = load("alice.json"), load("bob.json"), load("context-after.json"), load("export.json")
 assert alice["IssueId"] == bob["IssueId"], (alice, bob)
-assert alice["Status"] == "New" and alice["Playback"]["DeviceName"] == "Living Room TV"
+assert alice["Status"] == "new" and alice["Playback"]["DeviceName"] == "Living Room TV", alice
 assert [o["ReasonCode"] for o in after["OpenReports"]] == ["stutter"], after["OpenReports"]
 reports = export["reports"]
 assert len(reports) == 3, len(reports)
@@ -334,21 +366,24 @@ expect 404 report-not-found "Bob Laptop" "$bob" DELETE "/MediaReports/Report/Min
 expect 404 report-not-found "Bob Laptop" "$bob" DELETE "/MediaReports/Report/Mine/$audio_report"
 
 echo "== withdraw while New, refused once it is being looked at"
-ok "admin box" "$admin" POST /MediaReports/Admin/Issues/Status "{\"issueIds\":[$issue],\"status\":\"Investigating\"}" >/dev/null
+ok "admin box" "$admin" POST /MediaReports/Admin/Issues/Status "{\"issueIds\":[$issue],\"status\":\"investigating\"}" >/dev/null
 expect 409 not-new "Alice Phone" "$alice_phone" DELETE "/MediaReports/Report/Mine/$alice_report"
 expect 204 "" "Alice Phone" "$alice_phone" DELETE "/MediaReports/Report/Mine/$audio_report"
 
 echo "== the admin closes the issue; the notice reaches alice's phone"
-ok "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$issue" '{"status":"Fixed","notes":"Secret admin note: re-encoded."}' >/dev/null
+ok "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$issue" '{"status":"fixed","notes":"Secret admin note: re-encoded."}' >/dev/null
 deadline=$((SECONDS + 30))
 until [[ -f "$work/results/notices.json" ]]; do
   (( SECONDS < deadline )) || fail "no DisplayMessage arrived on alice's websocket"
   sleep 1
 done
-ok "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$issue" '{"status":"Duplicate"}' >/dev/null
+ok "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$issue" '{"status":"duplicate"}' >/dev/null
 sleep 5
 ok "Alice Phone" "$alice_phone" GET /MediaReports/Report/Mine >"$work/results/mine-after.json"
 ok "Alice Phone" "$alice_phone" GET "/MediaReports/Report/Mine/$alice_report" >"$work/results/mine-detail.json"
+ok "Alice Phone" "$alice_phone" GET /MediaReports/Report/Mine >"$work/results/mine-fetched.json"
+[[ "$(req "Alice Phone" "$alice_phone" POST "/MediaReports/Report/Mine/$alice_report/Seen")" == 204 ]] || fail "Seen did not answer 204"
+expect 404 report-not-found "Bob Laptop" "$bob" POST "/MediaReports/Report/Mine/$alice_report/Seen"
 ok "Alice Phone" "$alice_phone" GET /MediaReports/Report/Mine >"$work/results/mine-read.json"
 ok "Bob Laptop" "$bob" GET /MediaReports/Report/Mine >"$work/results/bob-mine.json"
 py - "$work/results" <<'PY' || fail "My Reports or the notice is wrong"
@@ -356,13 +391,18 @@ import json, os, sys
 r = sys.argv[1]
 load = lambda n: json.load(open(os.path.join(r, n)))
 title = load("context.json")["Name"]
-before, after, detail, read, bob = (load(n) for n in ("mine-before.json", "mine-after.json", "mine-detail.json", "mine-read.json", "bob-mine.json"))
+before, after, detail, fetched, read, bob = (load(n) for n in ("mine-before.json", "mine-after.json", "mine-detail.json", "mine-fetched.json", "mine-read.json", "bob-mine.json"))
 assert [x["ReasonLabel"] for x in before["Reports"]] == ["Audio problem", "Stutter or jitter"] and before["Unread"] == 0, before
+assert [x["Status"] for x in before["Reports"]] == ["new", "new"], before
 assert len(after["Reports"]) == 1 and after["Unread"] == 1 and after["Reports"][0]["Unread"], after
-assert after["Reports"][0]["StatusLabel"] == "Duplicate", after
+assert (after["Reports"][0]["Status"], after["Reports"][0]["StatusLabel"]) == ("duplicate", "Duplicate"), after
+assert detail["Status"] == "duplicate", detail
 assert after["Reports"][0]["ExpiresLabel"] == "Expires in 12 months" and after["Reports"][0]["CanHide"] is True, after
 assert [h["Label"] for h in detail["History"]] == ["Reported", "Being looked at", "Fixed", "Duplicate"], detail["History"]
+assert [h.get("Status") for h in detail["History"]] == [None, "investigating", "fixed", "duplicate"], detail["History"]
+assert detail["ReasonCode"] == "stutter" and [x["ReasonCode"] for x in before["Reports"]] == ["audio", "stutter"], (detail, before)
 assert detail["Note"] == "keeps jumping back" and detail.get("Device") == "Living Room TV" and detail["CanWithdraw"] is False, detail
+assert fetched["Unread"] == 1 and fetched["Reports"][0]["Unread"], fetched
 assert read["Unread"] == 0 and not read["Reports"][0]["Unread"], read
 assert bob["Unread"] == 1 and bob["Reports"][0]["StatusLabel"] == "Duplicate", bob
 notices = load("notices.json")
@@ -392,9 +432,9 @@ ok "Alice Phone" "$alice_phone" GET /MediaReports/Report/Mine >"$work/results/mi
 ok "Bob Laptop" "$bob" GET /MediaReports/Report/Mine >"$work/results/bob-after-hide.json"
 ok "admin box" "$admin" GET "/MediaReports/Admin/Issues/$issue" >"$work/results/issue-after-hide.json"
 sleep 1
-ok "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$issue" '{"status":"Investigating"}' >/dev/null
+ok "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$issue" '{"status":"investigating"}' >/dev/null
 ok "Alice Phone" "$alice_phone" GET /MediaReports/Report/Mine >"$work/results/mine-reopened.json"
-ok "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$issue" '{"status":"Fixed"}' >/dev/null
+ok "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$issue" '{"status":"fixed"}' >/dev/null
 ok "Alice Phone" "$alice_phone" POST /MediaReports/Report/Mine/HideClosed >"$work/results/hide-closed.json"
 ok "Alice Phone" "$alice_phone" GET /MediaReports/Report/Mine >"$work/results/mine-cleared.json"
 py - "$work/results" "$alice_report" "$open_report" <<'PY' || fail "removing reports from My Reports is wrong"
@@ -411,7 +451,7 @@ assert [x["Id"] for x in hidden["Reports"]] == [open_id] and hidden["Unread"] ==
 bob = load("bob-after-hide.json")
 assert len(bob["Reports"]) == 1 and bob["Reports"][0]["StatusLabel"] == "Duplicate", bob
 issue = load("issue-after-hide.json")
-assert issue["Status"] == "Duplicate" and len(issue["Reports"]) == 2, issue
+assert issue["Status"] == "duplicate" and len(issue["Reports"]) == 2, issue
 reopened = load("mine-reopened.json")
 back = row(reopened, closed_id)
 assert back and back["Unread"] and back["StatusLabel"] == "Being looked at" and reopened["Unread"] == 1, reopened
@@ -420,5 +460,23 @@ assert [x["Id"] for x in load("mine-cleared.json")["Reports"]] == [open_id], loa
 print("my reports: expiry follows the period (none at 0, 30 days, 12 months); a closed report hides while reporting is off, an open one is refused,")
 print("  it returns unread when reopened, and Clear all closed leaves only the open report; bob's report and the admin's issue are untouched")
 PY
+
+echo "== a user can file 30 reports an hour; the 31st is refused and nothing is kept"
+ok "admin box" "$admin" POST /Users/New '{"Name":"carol","Password":"carol-password"}' >/dev/null
+carol="$(sign_in "Carol Tablet" carol)"
+for _ in $(seq 30); do
+  id="$(ok "Carol Tablet" "$carol" POST /MediaReports/Report "{\"itemId\":\"$item_id\",\"reasonCode\":\"other\"}" | json "d['Id']")"
+  [[ "$(req "Carol Tablet" "$carol" DELETE "/MediaReports/Report/Mine/$id")" == 204 ]] || fail "carol could not withdraw report $id"
+done
+expect 429 too-many-reports "Carol Tablet" "$carol" POST /MediaReports/Report "{\"itemId\":\"$item_id\",\"reasonCode\":\"other\"}"
+ok "Carol Tablet" "$carol" GET /MediaReports/Report/Mine | json "len(d['Reports'])" | grep -x 0 >/dev/null || fail "the refused report was kept"
+echo "30 filed and withdrawn, the 31st refused, carol has no reports"
+
+echo "== the load signal names the caller's own app, whatever the body says"
+[[ "$(req "Carol Tablet" "$carol" POST /MediaReports/Client/Loaded '{"Client":"Made Up App","Version":"9.9.9"}')" == 204 ]] || fail "the load signal was refused"
+ok "admin box" "$admin" GET /MediaReports/Metrics >"$work/results/metrics.txt"
+grep -q '^media_reports_button_last_load_timestamp_seconds{client="media-reports-smoke"} ' "$work/results/metrics.txt" || { grep button "$work/results/metrics.txt" >&2; fail "the session's app was not recorded"; }
+! grep -q 'Made Up App' "$work/results/metrics.txt" || fail "the app named in the body was recorded"
+echo "recorded media-reports-smoke, not Made Up App"
 
 echo "PASS: filing reports on $image"

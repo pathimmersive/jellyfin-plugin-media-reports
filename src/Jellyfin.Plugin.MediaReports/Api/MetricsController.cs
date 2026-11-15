@@ -9,6 +9,7 @@ namespace Jellyfin.Plugin.MediaReports.Api;
 /// The Prometheus endpoint. Only an administrator's token or a Jellyfin API key reads it.
 /// </summary>
 [ApiController]
+[ApiErrors]
 [Authorize(Policy = Policies.RequiresElevation)]
 [Route("MediaReports/Metrics")]
 public sealed class MetricsController : ControllerBase

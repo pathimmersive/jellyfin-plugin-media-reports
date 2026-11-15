@@ -23,15 +23,16 @@ public sealed class RelinkTests : IDisposable
     private readonly FakeLibrary _library = new();
     private readonly Mock<ILibraryManager> _libraryManager = new();
     private readonly ListLogger<LibraryRelink> _logger = new();
+    private readonly ReportDatabase _db;
     private readonly ReportStore _store;
     private readonly LibraryRelink _relink;
 
     public RelinkTests()
     {
         Directory.CreateDirectory(_dir);
-        var db = new ReportDatabase(Path.Combine(_dir, "media-reports.db"), NullLogger<ReportDatabase>.Instance);
-        db.Initialize();
-        _store = new ReportStore(db, _clock, () => 365);
+        _db = new ReportDatabase(Path.Combine(_dir, "media-reports.db"), NullLogger<ReportDatabase>.Instance);
+        _db.Initialize();
+        _store = new ReportStore(_db, _clock, () => 365);
         _relink = new LibraryRelink(_libraryManager.Object, _library, _store, _logger);
     }
 
@@ -291,6 +292,33 @@ public sealed class RelinkTests : IDisposable
     }
 
     [Fact]
+    public async Task UpdatesToUnreportedItems_RunNoDatabaseQuery_UntilAReportChanges()
+    {
+        await _relink.StartAsync(default);
+        var old = Movie(tmdb: "603");
+        var filed = File(old, "stutter");
+        var unrelated = _library.Add(Movie(tmdb: "999"));
+        Update(unrelated);
+        await _relink.WhenIdle;
+
+        var before = _db.ConnectionsOpened;
+        for (var i = 0; i < 100; i++)
+        {
+            Update(unrelated);
+            _libraryManager.Raise(m => m.ItemRemoved += null, null, new ItemChangeEventArgs { Item = new Movie { Id = Guid.NewGuid() } });
+        }
+
+        await _relink.WhenIdle;
+        Assert.Equal(before, _db.ConnectionsOpened);
+
+        var replacement = _library.Add(Movie(tmdb: "603"));
+        Update(replacement);
+        await _relink.WhenIdle;
+        Assert.Equal(replacement.Id, _store.GetIssue(filed.IssueId)!.ItemId);
+        await _relink.StopAsync(default);
+    }
+
+    [Fact]
     public void Task_IsNamedAndRunsDaily()
     {
         var task = new RelinkTask(_relink, new ListLogger<RelinkTask>());
@@ -307,6 +335,9 @@ public sealed class RelinkTests : IDisposable
 
     private static RelinkTitle Title(string type, Dictionary<string, string> ids, Dictionary<string, string>? seriesIds = null, int? season = null, int? episode = null) =>
         new(Guid.NewGuid(), type, ids, seriesIds ?? [], season, episode);
+
+    private void Update(RelinkTitle title) =>
+        _libraryManager.Raise(m => m.ItemUpdated += null, null, new ItemChangeEventArgs { Item = new Movie { Id = title.Id, ProviderIds = new Dictionary<string, string>(title.ProviderIds) } });
 
     private FiledReport File(RelinkTitle title, string reason, long? size = 1000)
     {

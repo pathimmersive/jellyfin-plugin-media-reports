@@ -139,22 +139,81 @@ public sealed class ReportAlertsTests
     }
 
     [Fact]
-    public void Discord_ShowsTenReports_AndCountsTheRest()
+    public void Discord_PutsTenReportsInAMessage_AndTheRestInTheNext()
     {
         var reports = Enumerable.Range(1, 12).Select(i => Alert() with { Title = $"Movie {i}" }).ToList();
 
-        using var body = JsonDocument.Parse(ReportAlerts.Discord(reports));
+        var bodies = ReportAlerts.Discord(reports);
 
-        Assert.Equal("Media Reports", body.RootElement.GetProperty("username").GetString());
-        Assert.Equal(10, body.RootElement.GetProperty("embeds").GetArrayLength());
-        Assert.Equal("12 new reports: the first 10 below, and 2 more on the Media Reports page.", body.RootElement.GetProperty("content").GetString());
-        var embed = body.RootElement.GetProperty("embeds")[0];
-        Assert.Equal("Movie 1", embed.GetProperty("title").GetString());
+        Assert.Equal(2, bodies.Count);
+        using var first = JsonDocument.Parse(bodies[0]);
+        using var second = JsonDocument.Parse(bodies[1]);
+        Assert.Equal("Media Reports", first.RootElement.GetProperty("username").GetString());
+        Assert.Equal("12 new reports (1 of 2)", first.RootElement.GetProperty("content").GetString());
+        Assert.Equal("12 new reports (2 of 2)", second.RootElement.GetProperty("content").GetString());
+        Assert.Equal(
+            reports.Select(r => r.Title),
+            new[] { first, second }.SelectMany(b => b.RootElement.GetProperty("embeds").EnumerateArray()).Select(e => e.GetProperty("title").GetString()));
+        var embed = first.RootElement.GetProperty("embeds")[0];
         Assert.Equal("https://jf.example.com/web/#/configurationpage?name=mediareports&issue=7", embed.GetProperty("url").GetString());
         Assert.Equal(
             ["Reason", "Reported by", "Device", "How it played"],
             embed.GetProperty("fields").EnumerateArray().Select(f => f.GetProperty("name").GetString()));
         Assert.Equal("Living Room TV · Jellyfin Android TV", embed.GetProperty("fields")[2].GetProperty("value").GetString());
+        using var one = JsonDocument.Parse(Assert.Single(ReportAlerts.Discord([Alert()])));
+        Assert.Equal("1 new report", one.RootElement.GetProperty("content").GetString());
+    }
+
+    [Fact]
+    public void Discord_KeepsEachMessageWithin6000Characters_AndLeavesNoReportOut()
+    {
+        var worst = Alert() with
+        {
+            Title = new string('t', 400),
+            Note = new string('*', 299) + "…",
+            User = new string('u', 1200),
+            Device = new string('d', 1200),
+            HowItPlayed = new string('h', 1200),
+        };
+        var reports = Enumerable.Range(1, 10).Select(i => worst with { Title = i + new string('t', 400) }).ToList();
+
+        var bodies = ReportAlerts.Discord(reports);
+
+        var seen = 0;
+        foreach (var body in bodies)
+        {
+            using var doc = JsonDocument.Parse(body);
+            var embeds = doc.RootElement.GetProperty("embeds").EnumerateArray().ToList();
+            Assert.InRange(embeds.Count, 1, ReportAlerts.MaxEmbeds);
+            var characters = embeds.Sum(e =>
+                e.GetProperty("title").GetString()!.Length
+                + (e.TryGetProperty("description", out var d) ? d.GetString()!.Length : 0)
+                + e.GetProperty("fields").EnumerateArray().Sum(f => f.GetProperty("name").GetString()!.Length + f.GetProperty("value").GetString()!.Length));
+            Assert.InRange(characters, 1, ReportAlerts.MaxEmbedCharacters);
+            Assert.All(embeds, e =>
+            {
+                Assert.InRange(e.GetProperty("title").GetString()!.Length, 1, 256);
+                Assert.InRange(e.GetProperty("description").GetString()!.Length, 1, 4096);
+                Assert.All(e.GetProperty("fields").EnumerateArray(), f => Assert.InRange(f.GetProperty("value").GetString()!.Length, 1, 1024));
+            });
+            seen += embeds.Count;
+        }
+
+        Assert.True(bodies.Count > 1);
+        Assert.Equal(10, seen);
+    }
+
+    [Fact]
+    public void Discord_ShowsMarkdownInNotesAndNamesAsWritten()
+    {
+        var report = Alert() with { Note = "see [text](https://example.com) **now**", User = "_alice_" };
+
+        using var body = JsonDocument.Parse(Assert.Single(ReportAlerts.Discord([report])));
+
+        var embed = body.RootElement.GetProperty("embeds")[0];
+        Assert.Equal(@"see \[text\](https://example.com) \*\*now\*\*", embed.GetProperty("description").GetString());
+        Assert.Equal(@"\_alice\_", embed.GetProperty("fields")[1].GetProperty("value").GetString());
+        Assert.Equal("Test Movie", embed.GetProperty("title").GetString());
     }
 
     [Fact]

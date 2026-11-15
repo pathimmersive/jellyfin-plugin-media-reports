@@ -46,7 +46,7 @@ public sealed class ReportAlerts
     public const int MaxNoteLength = 300;
 
     /// <summary>
-    /// The most reports a Discord message shows; the rest are counted.
+    /// The most embeds, one per report, in one Discord message.
     /// </summary>
     public const int MaxEmbeds = 10;
 
@@ -154,7 +154,7 @@ public sealed class ReportAlerts
         var results = new List<TestAlertResult>();
         foreach (var (field, address, body) in new[]
         {
-            ("discordWebhookUrl", discordWebhookUrl?.Trim(), Discord([sample])),
+            ("discordWebhookUrl", discordWebhookUrl?.Trim(), Discord([sample])[0]),
             ("webhookUrl", webhookUrl?.Trim(), Generic([sample])),
         })
         {
@@ -177,50 +177,129 @@ public sealed class ReportAlerts
     }
 
     /// <summary>
-    /// Builds the Discord message for a group of reports: one embed per report, at most ten.
+    /// The most characters Discord takes across the embeds of one message.
+    /// </summary>
+    public const int MaxEmbedCharacters = 6000;
+
+    /// <summary>
+    /// Builds the Discord messages for a group of reports: one embed per report, as many to a
+    /// message as Discord's limits allow, so every report appears in one of them.
     /// </summary>
     /// <param name="reports">The reports.</param>
-    /// <returns>The JSON body.</returns>
-    public static string Discord(IReadOnlyList<AlertReport> reports)
+    /// <returns>The JSON bodies, in order.</returns>
+    public static IReadOnlyList<string> Discord(IReadOnlyList<AlertReport> reports)
     {
         ArgumentNullException.ThrowIfNull(reports);
-        var count = reports.Count == 1 ? "1 new report" : $"{reports.Count} new reports";
-        var content = reports.Count > MaxEmbeds ? $"{count}: the first {MaxEmbeds} below, and {reports.Count - MaxEmbeds} more on the Media Reports page." : count;
-        var embeds = new JsonArray();
-        foreach (var r in reports.Take(MaxEmbeds))
+        var messages = new List<List<(JsonObject Embed, int Size)>>();
+        var current = new List<(JsonObject Embed, int Size)>();
+        var size = 0;
+        foreach (var r in reports)
         {
-            var fields = new JsonArray();
-            foreach (var (name, value) in new[]
+            var embed = DiscordEmbed(r, out var embedSize);
+            if (current.Count == MaxEmbeds || (current.Count > 0 && size + embedSize > MaxEmbedCharacters))
             {
-                ("Reason", r.Reason),
-                ("Reported by", r.User),
-                ("Device", string.Join(" · ", new[] { r.Device, r.Client }.Where(v => !string.IsNullOrEmpty(v)))),
-                ("How it played", r.HowItPlayed),
-            })
-            {
-                if (!string.IsNullOrEmpty(value))
-                {
-                    fields.Add(new JsonObject { ["name"] = name, ["value"] = Cut(value, 1024), ["inline"] = true });
-                }
+                messages.Add(current);
+                current = [];
+                size = 0;
             }
 
-            var embed = new JsonObject
-            {
-                ["title"] = Cut(r.Title, 256),
-                ["url"] = r.Link,
-                ["color"] = DiscordAmber,
-                ["fields"] = fields,
-                ["timestamp"] = r.FiledAt.ToString("o", CultureInfo.InvariantCulture),
-            };
-            if (!string.IsNullOrEmpty(r.Note))
-            {
-                embed["description"] = r.Note;
-            }
-
-            embeds.Add(embed);
+            current.Add((embed, embedSize));
+            size += embedSize;
         }
 
-        return new JsonObject { ["username"] = "Media Reports", ["content"] = content, ["embeds"] = embeds }.ToJsonString(BodyOptions);
+        if (current.Count > 0)
+        {
+            messages.Add(current);
+        }
+
+        var count = reports.Count == 1 ? "1 new report" : $"{reports.Count} new reports";
+        return messages.Select((m, n) => new JsonObject
+        {
+            ["username"] = "Media Reports",
+            ["content"] = messages.Count == 1 ? count : $"{count} ({n + 1} of {messages.Count})",
+            ["embeds"] = new JsonArray(m.Select(e => (JsonNode)e.Embed).ToArray()),
+        }.ToJsonString(BodyOptions)).ToList();
+    }
+
+    /// <summary>
+    /// Escapes Discord's Markdown characters so text shows as written.
+    /// </summary>
+    /// <param name="text">The text.</param>
+    /// <returns>The escaped text.</returns>
+    public static string EscapeMarkdown(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        var escaped = new System.Text.StringBuilder(text.Length);
+        foreach (var c in text)
+        {
+            if (c is '\\' or '*' or '_' or '~' or '`' or '|' or '>' or '[' or ']' or '#')
+            {
+                escaped.Append('\\');
+            }
+
+            escaped.Append(c);
+        }
+
+        return escaped.ToString();
+    }
+
+    // One report's embed and the characters Discord counts for it. Text is cut before it is
+    // escaped, then the escaped text is kept within Discord's per-part limits.
+    private static JsonObject DiscordEmbed(AlertReport r, out int size)
+    {
+        var fields = new JsonArray();
+        var title = Fit(r.Title, 256);
+        size = title.Length;
+        foreach (var (name, value) in new[]
+        {
+            ("Reason", r.Reason),
+            ("Reported by", r.User),
+            ("Device", string.Join(" · ", new[] { r.Device, r.Client }.Where(v => !string.IsNullOrEmpty(v)))),
+            ("How it played", r.HowItPlayed),
+        })
+        {
+            if (!string.IsNullOrEmpty(value))
+            {
+                var text = Fit(value, 1024);
+                fields.Add(new JsonObject { ["name"] = name, ["value"] = text, ["inline"] = true });
+                size += name.Length + text.Length;
+            }
+        }
+
+        var embed = new JsonObject
+        {
+            ["title"] = title,
+            ["url"] = r.Link,
+            ["color"] = DiscordAmber,
+            ["fields"] = fields,
+            ["timestamp"] = r.FiledAt.ToString("o", CultureInfo.InvariantCulture),
+        };
+        if (!string.IsNullOrEmpty(r.Note))
+        {
+            var note = Fit(r.Note, 4096);
+            embed["description"] = note;
+            size += note.Length;
+        }
+
+        return embed;
+    }
+
+    // Escapes text and keeps it within a limit, never ending on a lone escape.
+    private static string Fit(string text, int max)
+    {
+        var escaped = EscapeMarkdown(text);
+        if (escaped.Length <= max)
+        {
+            return escaped;
+        }
+
+        var cut = escaped[..(max - 1)];
+        if (cut.Length - cut.TrimEnd('\\').Length is var trailing && trailing % 2 == 1)
+        {
+            cut = cut[..^1];
+        }
+
+        return cut + "…";
     }
 
     /// <summary>
@@ -376,7 +455,7 @@ public sealed class ReportAlerts
         var sends = new List<Task>();
         if (!string.IsNullOrWhiteSpace(config.DiscordWebhookUrl))
         {
-            sends.Add(SendWithRetry("Discord", config.DiscordWebhookUrl.Trim(), Discord(group)));
+            sends.Add(SendAll("Discord", config.DiscordWebhookUrl.Trim(), Discord(group)));
         }
 
         if (!string.IsNullOrWhiteSpace(config.WebhookUrl))
@@ -385,6 +464,15 @@ public sealed class ReportAlerts
         }
 
         await Task.WhenAll(sends).ConfigureAwait(false);
+    }
+
+    // Sends a channel's messages one after another, each with its retry.
+    private async Task SendAll(string channel, string address, IReadOnlyList<string> bodies)
+    {
+        foreach (var body in bodies)
+        {
+            await SendWithRetry(channel, address, body).ConfigureAwait(false);
+        }
     }
 
     private async Task SendWithRetry(string channel, string address, string body)

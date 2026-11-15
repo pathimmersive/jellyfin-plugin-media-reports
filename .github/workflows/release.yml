@@ -1,5 +1,6 @@
 # A version tag (v1.2.3 or v1.2.3.4) packages the plugin, creates the GitHub Release
 # with the zip and its manifest entry, then rebuilds manifest.json on GitHub Pages.
+# The tag's CHANGELOG.md entry is the release notes and the manifest changelog.
 # A release that already exists is never replaced: a fix ships as a new version.
 name: Release
 
@@ -26,22 +27,26 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
+      - name: Release notes
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          # A tag with no dated CHANGELOG.md entry stops here, before anything is published.
+          mkdir -p release
+          dotnet run scripts/release-tool.cs -- changelog --release --file CHANGELOG.md --version "$TAG" >release/notes.md
       - name: Package
         env:
           TAG: ${{ github.ref_name }}
         run: |
-          # The checkout holds the tag without its message; fetch it for the changelog.
-          git fetch --force --no-tags origin "refs/tags/$TAG:refs/tags/$TAG"
-          changelog="$(git tag -l --format='%(contents:subject)' "$TAG")"
           bash scripts/package.sh "$TAG" release \
-            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$TAG" "$changelog"
+            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$TAG"
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
           gh release create "$TAG" release/media-reports_*.zip release/media-reports_*.json \
-            --verify-tag --title "Media Reports $TAG" --notes-from-tag
+            --verify-tag --title "Media Reports $TAG" --notes-file release/notes.md
 
   pages:
     needs: release

@@ -385,10 +385,10 @@
     }
 
     function statusPhrase(status) {
-        if (status === 'New') {
+        if (status === 'new') {
             return "It's waiting to be looked at.";
         }
-        if (status === 'Investigating' || status === 'ReplacedVerify') {
+        if (status === 'investigating') {
             return "It's being looked at.";
         }
         return '';
@@ -729,7 +729,7 @@
     // ---- My Reports -----------------------------------------------------------------------
 
     var MINE_LABEL = 'My Reports';
-    var PILLS = { New: 'mr-new', Investigating: 'mr-looking', ReplacedVerify: 'mr-looking', Fixed: 'mr-fixed' };
+    var PILLS = { 'new': 'mr-new', investigating: 'mr-looking', fixed: 'mr-fixed' };
     var DOT = 'mediaReportsDot';
     var USER_BUTTONS = 'button[aria-controls=app-user-menu], .headerUserButton';
     var SETTINGS_ITEM = 'a[role=menuitem][href="#/mypreferencesmenu"]';
@@ -1099,8 +1099,9 @@
             if (open !== state) {
                 return;
             }
-            // Opening it marked it read on the server.
+            // Showing it is what marks it read.
             if (report.Unread) {
+                call('POST', 'MediaReports/Report/Mine/' + report.Id + '/Seen');
                 report.Unread = false;
                 state.mine.Unread = Math.max(0, (state.mine.Unread || 0) - 1);
             }

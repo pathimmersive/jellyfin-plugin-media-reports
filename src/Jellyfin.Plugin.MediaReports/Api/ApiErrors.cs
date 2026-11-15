@@ -48,7 +48,8 @@ public sealed class ApiErrorsAttribute : Attribute, IActionFilter, IOrderedFilte
 /// </summary>
 public sealed class ApiErrorMiddleware
 {
-    private static readonly JsonSerializerOptions BodyOptions = new();
+    private static readonly JsonSerializerOptions PascalCase = new();
+    private static readonly JsonSerializerOptions CamelCase = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     private readonly RequestDelegate _next;
 
     /// <summary>
@@ -70,6 +71,19 @@ public sealed class ApiErrorMiddleware
         var value = path.Value ?? string.Empty;
         return value.Contains("/MediaReports/", StringComparison.OrdinalIgnoreCase)
             || value.EndsWith("/MediaReports", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether a request asks for Jellyfin's camelCase JSON profile,
+    /// as in <c>Accept: application/json; profile="CamelCase"</c>.
+    /// </summary>
+    /// <param name="request">The request.</param>
+    /// <returns>Whether field names should be camelCase.</returns>
+    public static bool WantsCamelCase(HttpRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return request.Headers.Accept.Any(value => value is not null
+            && value.Replace("\"", string.Empty, StringComparison.Ordinal).Contains("profile=camelcase", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
@@ -105,6 +119,7 @@ public sealed class ApiErrorMiddleware
         }
 
         response.ContentType = "application/json; charset=utf-8";
-        await JsonSerializer.SerializeAsync(response.Body, ErrorFor(response.StatusCode), BodyOptions, context.RequestAborted).ConfigureAwait(false);
+        var options = WantsCamelCase(context.Request) ? CamelCase : PascalCase;
+        await JsonSerializer.SerializeAsync(response.Body, ErrorFor(response.StatusCode), options, context.RequestAborted).ConfigureAwait(false);
     }
 }

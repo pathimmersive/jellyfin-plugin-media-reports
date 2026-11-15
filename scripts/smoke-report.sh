@@ -180,6 +180,17 @@ assert d["ApiVersion"] == 1 and d["Version"].count(".") == 3 and d["ReportingEna
 print("Info: version %s, API version 1, reporting on" % d["Version"])' || fail "Info is wrong"
 expect 404 item-not-found "Alice Phone" "$alice_phone" GET "/MediaReports/Report/Context?itemId=$(py -c 'import uuid;print(uuid.uuid4())')"
 
+echo "== error bodies follow Jellyfin's camelCase profile when asked"
+camel='Accept: application/json; profile="CamelCase"'
+for call in "|/MediaReports/Info|unauthorized" \
+  "$(auth "Alice Phone" "$alice_phone")|/MediaReports/Report/Context?itemId=$(py -c 'import uuid;print(uuid.uuid4())')|item-not-found"; do
+  IFS='|' read -r who path code <<<"$call"
+  curl -sS -o "$work/results/camel.json" -H "$camel" ${who:+-H "Authorization: $who"} "$api$path"
+  [[ "$(json "','.join(d.keys()) + ' ' + d['code']" <"$work/results/camel.json")" == "code,message $code" ]] ||
+    fail "GET $path with the camelCase profile answered $(cat "$work/results/camel.json")"
+done
+echo "a 401 from Jellyfin and a refusal from the plugin both read code and message"
+
 echo "== context from alice's phone names the TV playback"
 ok "Alice Phone" "$alice_phone" GET "/MediaReports/Report/Context?itemId=$item_id" >"$work/results/context.json"
 py - "$work/results/context.json" <<'PY' || fail "the context is wrong"

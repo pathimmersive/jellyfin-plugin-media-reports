@@ -142,6 +142,19 @@ public sealed class ApiErrorTests : IAsyncLifetime
         Assert.Equal("True", Field(body, "ReportingEnabled"));
     }
 
+    [Theory]
+    [InlineData("/MediaReports/Info", false, "unauthorized")]
+    [InlineData("/MediaReports/Nothing/Here", true, "not-found")]
+    public async Task MiddlewareErrors_FollowTheCamelCaseProfile_WhenAskedFor(string path, bool user, string code)
+    {
+        var (_, camel) = await Send(HttpMethod.Get, path, user, accept: "application/json; profile=\"CamelCase\"");
+        var (_, pascal) = await Send(HttpMethod.Get, path, user);
+
+        Assert.Equal(["code", "message"], camel.EnumerateObject().Select(p => p.Name));
+        Assert.Equal(code, camel.GetProperty("code").GetString());
+        Assert.Equal(["Code", "Message"], pascal.EnumerateObject().Select(p => p.Name));
+    }
+
     [Fact]
     public void EveryController_CarriesTheErrorFilter()
     {
@@ -164,9 +177,14 @@ public sealed class ApiErrorTests : IAsyncLifetime
         };
     }
 
-    private async Task<(HttpStatusCode Status, JsonElement Body)> Send(HttpMethod method, string path, bool user, string? json = null)
+    private async Task<(HttpStatusCode Status, JsonElement Body)> Send(HttpMethod method, string path, bool user, string? json = null, string? accept = null)
     {
         using var request = new HttpRequestMessage(method, new Uri(path, UriKind.Relative));
+        if (accept is not null)
+        {
+            request.Headers.TryAddWithoutValidation("Accept", accept);
+        }
+
         if (user)
         {
             request.Headers.Add("X-Test-User", "alice");

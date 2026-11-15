@@ -132,6 +132,9 @@ Refusals:
 | 409 | `already-reported` | The caller already has an open report for this reason on this title. |
 | 429 | `too-many-reports` | The caller filed 30 reports in the past hour, withdrawn ones included. |
 
+One user's filings are handled one at a time, so requests sent together still meet the limit and
+the one-open-report-per-reason rule.
+
 ### `GET /MediaReports/Report/Mine`
 
 *User.* The caller's reports, newest first, and how many are unread. Reports the caller removed

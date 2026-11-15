@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Threading;
+using System.Threading.Tasks;
 using Jellyfin.Database.Implementations.Entities;
 using Jellyfin.Plugin.MediaReports.Api;
 using Jellyfin.Plugin.MediaReports.Configuration;
@@ -222,6 +223,44 @@ public sealed class ReportServiceTests : IDisposable
 
         Assert.Equal(1, _store.GetReportCount());
         Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "audio", new string('x', 1000))));
+    }
+
+    [Fact]
+    public void File_InParallel_StoresOneReportPerItemAndReason()
+    {
+        var results = FileInParallel(20, _ => new FileReportRequest(MovieId, "stutter", null));
+
+        Assert.Equal(1, results.Count(r => r.Outcome == Outcome.Ok));
+        Assert.All(results.Where(r => r.Outcome != Outcome.Ok), r => Assert.Equal("already-reported", r.Code));
+        Assert.Equal(1, _store.GetReportCount());
+    }
+
+    [Fact]
+    public void File_InParallel_NeverPassesTheHourlyLimit()
+    {
+        for (var i = 0; i < ReportService.MaxReportsPerHour - 1; i++)
+        {
+            var filed = Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)));
+            Assert.Equal(Outcome.Ok, _service.Withdraw(_alice.Id, filed.Id).Outcome);
+        }
+
+        var reasons = PluginConfiguration.DefaultReasons().Select(r => r.Code).ToArray();
+        var results = FileInParallel(reasons.Length, n => new FileReportRequest(MovieId, reasons[n], null));
+
+        Assert.Equal(1, results.Count(r => r.Outcome == Outcome.Ok));
+        Assert.All(results.Where(r => r.Outcome != Outcome.Ok), r => Assert.Equal("too-many-reports", r.Code));
+    }
+
+    private List<ServiceResult<FiledReportView>> FileInParallel(int count, Func<int, FileReportRequest> request)
+    {
+        using var start = new Barrier(count);
+        var tasks = Enumerable.Range(0, count).Select(n => Task.Run(() =>
+        {
+            start.SignalAndWait();
+            return _service.File(_alice.Id, null, request(n));
+        })).ToArray();
+        Task.WaitAll(tasks);
+        return tasks.Select(t => t.Result).ToList();
     }
 
     [Fact]

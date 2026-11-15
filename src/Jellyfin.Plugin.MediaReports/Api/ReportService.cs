@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -36,6 +37,10 @@ public sealed class ReportService
     private readonly TimeProvider _time;
     private readonly Action<StoredReport>? _filed;
     private readonly Dictionary<Guid, Queue<DateTimeOffset>> _recentFilings = [];
+
+    // One user's filings run one at a time, so parallel requests can't pass the hourly limit
+    // or the open-report check between the check and the insert.
+    private readonly ConcurrentDictionary<Guid, object> _filingGates = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ReportService"/> class.
@@ -102,6 +107,14 @@ public sealed class ReportService
     /// <param name="request">The report.</param>
     /// <returns>The filed report, or a refusal.</returns>
     public ServiceResult<FiledReportView> File(Guid userId, string? deviceId, FileReportRequest request)
+    {
+        lock (_filingGates.GetOrAdd(userId, _ => new object()))
+        {
+            return FileOne(userId, deviceId, request);
+        }
+    }
+
+    private ServiceResult<FiledReportView> FileOne(Guid userId, string? deviceId, FileReportRequest request)
     {
         var config = _config();
         if (!config.ReportingEnabled)

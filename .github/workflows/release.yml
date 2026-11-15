@@ -31,9 +31,9 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: |
-          # A tag with no CHANGELOG.md entry stops here, before anything is published.
+          # A tag with no dated CHANGELOG.md entry stops here, before anything is published.
           mkdir -p release
-          dotnet run scripts/release-tool.cs -- changelog --file CHANGELOG.md --version "$TAG" >release/notes.md
+          dotnet run scripts/release-tool.cs -- changelog --release --file CHANGELOG.md --version "$TAG" >release/notes.md
       - name: Package
         env:
           TAG: ${{ github.ref_name }}

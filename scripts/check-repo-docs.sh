@@ -79,6 +79,15 @@ if [[ -s CHANGELOG.md ]]; then
 else
   fail "CHANGELOG.md is missing or empty"
 fi
+# Release notes for a tag come only from a dated entry, never from one still marked Unreleased.
+notes_dir="$(mktemp -d)"
+printf '# Changelog\n\n## [9.8.7] - Unreleased\n\n- Not out yet.\n\n## [9.8.6] - 2026-01-02\n\n- Out.\n' >"$notes_dir/CHANGELOG.md"
+if dotnet run scripts/release-tool.cs -- changelog --release --file "$notes_dir/CHANGELOG.md" --version v9.8.7 >/dev/null 2>&1; then
+  fail "release-tool gives release notes for an entry marked Unreleased"
+fi
+dotnet run scripts/release-tool.cs -- changelog --release --file "$notes_dir/CHANGELOG.md" --version v9.8.6 >/dev/null ||
+  fail "release-tool refuses release notes for a dated entry"
+rm -rf "$notes_dir"
 if [[ -s CONTRIBUTING.md ]]; then
   contains CONTRIBUTING.md "dotnet test" "name the test command"
   contains CONTRIBUTING.md "scripts/smoke-load\.sh" "name the load check"

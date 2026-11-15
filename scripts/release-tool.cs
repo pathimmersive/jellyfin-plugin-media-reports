@@ -7,9 +7,11 @@
 //     its changelog entry) and <out>/media-reports_<version>.json, the manifest entry
 //     for that zip. Fails when the changelog has no entry for the version.
 //
-//   dotnet run scripts/release-tool.cs -- changelog --file <CHANGELOG.md> --version <x.y.z[.w]>
+//   dotnet run scripts/release-tool.cs -- changelog --file <CHANGELOG.md> --version <x.y.z[.w]> [--release]
 //     Prints the version's entry: the text under its "## [x.y.z]" heading. A leading v
 //     is ignored, and 0.1.0 and 0.1.0.0 name the same version. Fails without an entry.
+//     With --release the heading must carry a release date ("## [0.1.0] - 2026-11-20"),
+//     so an entry still marked Unreleased never becomes release notes.
 //
 //   dotnet run scripts/release-tool.cs -- manifest --meta <meta.json> --out <manifest.json>
 //       --image-url-base <url> (--entries <dir> | --github)
@@ -43,7 +45,7 @@ try
             await Manifest(options);
             break;
         case "changelog":
-            Console.WriteLine(ChangelogEntry(Required(options, "file"), Required(options, "version")));
+            Console.WriteLine(ChangelogEntry(Required(options, "file"), Required(options, "version"), options.ContainsKey("release")));
             break;
         default:
             throw new ArgumentException($"unknown command: {args[0]}");
@@ -236,7 +238,7 @@ async Task<List<JsonObject>> ReadGitHubEntries()
 
 // The text under the "## [x.y.z]" heading of a Keep a Changelog file, up to the next
 // "## " heading or the link definitions at the end.
-static string ChangelogEntry(string path, string version)
+static string ChangelogEntry(string path, string version, bool released = false)
 {
     var wanted = FourParts(version) ?? throw new ArgumentException($"not a release version: {version}");
     var lines = File.ReadAllLines(path);
@@ -245,6 +247,11 @@ static string ChangelogEntry(string path, string version)
     if (start < 0)
     {
         throw new InvalidDataException($"{path} has no entry for {version}");
+    }
+
+    if (released && !Regex.IsMatch(lines[start], @"^## \[[^\]]+\] - \d{4}-\d{2}-\d{2}\s*$"))
+    {
+        throw new InvalidDataException($"{path}: the entry for {version} has no release date (\"{lines[start].Trim()}\")");
     }
 
     var body = lines.Skip(start + 1)

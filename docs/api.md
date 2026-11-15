@@ -20,14 +20,22 @@ Authorization: MediaBrowser Client="My App", Device="Pixel 9", DeviceId="abc123"
 - One route, the Report button script, takes no token.
 
 **Bodies.** Requests and answers are JSON. Jellyfin writes field names in PascalCase (`ReasonCode`).
-A client that asks Jellyfin for its camelCase profile gets camelCase from the plugin's own answers,
-so read field names without regard to case. Times are ISO 8601 with an offset. Item ids are
+A request that asks for Jellyfin's camelCase profile (`Accept: application/json;
+profile="CamelCase"`) gets camelCase everywhere, error bodies included. Times are ISO 8601 with an offset. Item ids are
 Jellyfin's GUIDs. Report, issue and finding ids are numbers.
+
+**Values you don't know.** Within API version 1 new values and new fields are added without
+raising the version. Accept them:
+
+- a status, reason code, error `Code`, playback `State` or item type you don't recognise: show
+  its label, or treat it as a generic one, rather than failing;
+- fields you don't expect: ignore them;
+- the reportable types from `GET /MediaReports/Info`: offer a Report button only on those.
 
 **Errors.** Every refusal has a JSON body with a stable `Code` and a `Message` for people:
 
 ```json
-{ "Code": "already-reported", "Message": "You already reported this reason for this title." }
+{ "Code": "already-reported", "Message": "You already have an open report on this title for that reason." }
 ```
 
 Write code against `Code`; `Message` wording may change. Some refusals add a field that names

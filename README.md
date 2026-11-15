@@ -142,7 +142,7 @@ Versions are `major.minor.patch`; Jellyfin shows them with a fourth part, `0.1.0
 - **Minor** (0.2.0): new features. Settings and stored reports carry over.
 - **Major**: a change to the HTTP API or to stored data that can't carry over. The API version in `GET /MediaReports/Info` changes with it.
 
-Before 1.0.0 a minor version may also change the API; [CHANGELOG.md](CHANGELOG.md) says so when it does.
+The API version is separate from the plugin version: any change that would break a client raises it, before 1.0.0 too, and [CHANGELOG.md](CHANGELOG.md) says so. New fields and new routes don't raise it ([docs/api.md](docs/api.md)).
 
 | Media Reports | Jellyfin |
 |---|---|

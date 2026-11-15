@@ -125,6 +125,7 @@ py() {
 }
 if [[ -s docs/api.md ]]; then
   contains README.md "docs/api\.md" "link the API reference"
+  contains docs/api.md "^\*\*Values you don't know\.\*\*" "tell clients to accept values they don't know"
   # Each controller's [Route] joined with each action's [HttpX] template, constants resolved,
   # against the `### `METHOD /path`` headings of docs/api.md; a route on one side only fails.
   py - docs/api.md $(find src -name '*.cs' -not -path '*/obj/*' -not -path '*/bin/*') <<'PY' || fail "docs/api.md and the controllers' routes differ"

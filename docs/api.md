@@ -21,7 +21,8 @@ Authorization: MediaBrowser Client="My App", Device="Pixel 9", DeviceId="abc123"
 
 **Bodies.** Requests and answers are JSON. Jellyfin writes field names in PascalCase (`ReasonCode`).
 A request that asks for Jellyfin's camelCase profile (`Accept: application/json;
-profile="CamelCase"`) gets camelCase everywhere, error bodies included. Times are ISO 8601 with an offset. Item ids are
+profile="CamelCase"`) gets camelCase everywhere, error bodies included. Jellyfin leaves a field out when
+its value is null, so treat a missing field as null. Times are ISO 8601 with an offset. Item ids are
 Jellyfin's GUIDs. Report, issue and finding ids are numbers.
 
 **Values you don't know.** Within API version 1 new values and new fields are added without
@@ -172,12 +173,12 @@ sees it.
   "ReasonLabel": "Stutter or jitter", "Note": "Freezes at the start of every scene.",
   "Device": "Living Room TV", "CreatedAt": "…", "Status": "fixed", "StatusLabel": "Fixed",
   "CanWithdraw": false,
-  "History": [ { "At": "…", "Label": "Reported", "Status": null },
+  "History": [ { "At": "…", "Label": "Reported" },
                { "At": "…", "Label": "Fixed", "Status": "fixed" } ] }
 ```
 
-`ReasonCode` and each step's `Status` are codes a client can translate; `Status` is null on the
-filing step. The labels are English text for people.
+`ReasonCode` and each step's `Status` are codes a client can translate; the filing step has no
+`Status`. The labels are English text for people.
 
 Refusal: 404 `report-not-found`, also for another user's report.
 

@@ -468,6 +468,9 @@ public sealed class ReportServiceTests : IDisposable
         Assert.Equal(("Stutter or jitter", "Jumps back every few seconds", "Living Room TV"), (detail.ReasonLabel, detail.Note, detail.Device));
         Assert.Equal(("wont-fix", "Won't fix", false), (detail.Status, detail.StatusLabel, detail.CanWithdraw));
         Assert.Equal(["Reported", "Being looked at", "Won't fix"], detail.History.Select(h => h.Label));
+        Assert.Equal([null, "investigating", "wont-fix"], detail.History.Select(h => h.Status));
+        Assert.Equal("stutter", detail.ReasonCode);
+        Assert.Equal("stutter", Ok(_service.Mine(_alice.Id)).Reports[0].ReasonCode);
         var json = JsonSerializer.Serialize(detail);
         Assert.DoesNotContain("Secret", json, StringComparison.Ordinal);
         Assert.DoesNotContain("Resolution", json, StringComparison.Ordinal);

@@ -268,6 +268,7 @@ public sealed class ReportService
                 Id = r.Report.Id,
                 ItemId = r.Report.ItemId,
                 Title = ReporterText.Title(r.Report),
+                ReasonCode = r.Report.ReasonCode,
                 ReasonLabel = Label(reasons, r.Report.ReasonCode),
                 CreatedAt = r.Report.CreatedAt,
                 Status = ReporterText.StatusCode(r.Status),
@@ -339,12 +340,13 @@ public sealed class ReportService
             .Where(e => e.Kind == "status changed" && e.At >= report.CreatedAt)
             .Select(e => (e.At, Status: ReporterText.StatusChangedTo(e.Detail)))
             .Where(e => e.Status is not null)
-            .Select(e => new MyReportStep(e.At, ReporterText.StatusLabel(e.Status!.Value)));
+            .Select(e => new MyReportStep(e.At, ReporterText.StatusLabel(e.Status!.Value), ReporterText.StatusCode(e.Status!.Value)));
         return ServiceResult<MyReportDetail>.Success(new MyReportDetail
         {
             Id = report.Id,
             ItemId = report.ItemId,
             Title = ReporterText.Title(report),
+            ReasonCode = report.ReasonCode,
             ReasonLabel = Label(_config().GetReasons(), report.ReasonCode),
             Note = report.Note,
             Device = report.Device,
@@ -352,7 +354,7 @@ public sealed class ReportService
             Status = ReporterText.StatusCode(mine.Status),
             StatusLabel = ReporterText.StatusLabel(mine.Status),
             CanWithdraw = mine.Status == IssueStatus.New,
-            History = [new MyReportStep(report.CreatedAt, "Reported"), .. changes],
+            History = [new MyReportStep(report.CreatedAt, "Reported", null), .. changes],
         });
     }
 

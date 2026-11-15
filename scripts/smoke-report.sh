@@ -399,6 +399,8 @@ assert (after["Reports"][0]["Status"], after["Reports"][0]["StatusLabel"]) == ("
 assert detail["Status"] == "duplicate", detail
 assert after["Reports"][0]["ExpiresLabel"] == "Expires in 12 months" and after["Reports"][0]["CanHide"] is True, after
 assert [h["Label"] for h in detail["History"]] == ["Reported", "Being looked at", "Fixed", "Duplicate"], detail["History"]
+assert [h["Status"] for h in detail["History"]] == [None, "investigating", "fixed", "duplicate"], detail["History"]
+assert detail["ReasonCode"] == "stutter" and [x["ReasonCode"] for x in before["Reports"]] == ["audio", "stutter"], (detail, before)
 assert detail["Note"] == "keeps jumping back" and detail.get("Device") == "Living Room TV" and detail["CanWithdraw"] is False, detail
 assert fetched["Unread"] == 1 and fetched["Reports"][0]["Unread"], fetched
 assert read["Unread"] == 0 and not read["Reports"][0]["Unread"], read

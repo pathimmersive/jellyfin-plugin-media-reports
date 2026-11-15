@@ -182,6 +182,9 @@ public sealed record MyReportRow
     /// <summary>Gets the title as the reporter sees it.</summary>
     public string Title { get; init; } = string.Empty;
 
+    /// <summary>Gets the reason code, stable across renames.</summary>
+    public string ReasonCode { get; init; } = string.Empty;
+
     /// <summary>Gets the reason's current label.</summary>
     public string ReasonLabel { get; init; } = string.Empty;
 
@@ -233,6 +236,9 @@ public sealed record MyReportDetail
     /// <summary>Gets the title as the reporter sees it.</summary>
     public string Title { get; init; } = string.Empty;
 
+    /// <summary>Gets the reason code.</summary>
+    public string ReasonCode { get; init; } = string.Empty;
+
     /// <summary>Gets the reason's current label.</summary>
     public string ReasonLabel { get; init; } = string.Empty;
 
@@ -263,4 +269,5 @@ public sealed record MyReportDetail
 /// </summary>
 /// <param name="At">When.</param>
 /// <param name="Label">"Reported", or the status it moved to.</param>
-public sealed record MyReportStep(DateTimeOffset At, string Label);
+/// <param name="Status">The code of the status it moved to, from the reporter set; null for the filing.</param>
+public sealed record MyReportStep(DateTimeOffset At, string Label, string? Status);

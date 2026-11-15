@@ -147,8 +147,8 @@ from their list are left out.
 ```json
 {
   "Reports": [ {
-    "Id": 31, "ItemId": "6f1c…", "Title": "Test Series S02E05", "ReasonLabel": "Stutter or jitter",
-    "CreatedAt": "…", "Status": "fixed", "StatusLabel": "Fixed", "Unread": true,
+    "Id": 31, "ItemId": "6f1c…", "Title": "Test Series S02E05", "ReasonCode": "stutter",
+    "ReasonLabel": "Stutter or jitter", "CreatedAt": "…", "Status": "fixed", "StatusLabel": "Fixed", "Unread": true,
     "ExpiresAt": "2027-11-14T20:00:00+00:00", "ExpiresLabel": "Expires in 12 months",
     "CanHide": true, "CanWithdraw": false
   } ],
@@ -166,11 +166,16 @@ is open or when nothing is deleted. Works while reporting is off.
 sees it.
 
 ```json
-{ "Id": 31, "ItemId": "6f1c…", "Title": "Test Series S02E05", "ReasonLabel": "Stutter or jitter",
-  "Note": "Freezes at the start of every scene.", "Device": "Living Room TV", "CreatedAt": "…",
-  "Status": "fixed", "StatusLabel": "Fixed", "CanWithdraw": false,
-  "History": [ { "At": "…", "Label": "Reported" }, { "At": "…", "Label": "Fixed" } ] }
+{ "Id": 31, "ItemId": "6f1c…", "Title": "Test Series S02E05", "ReasonCode": "stutter",
+  "ReasonLabel": "Stutter or jitter", "Note": "Freezes at the start of every scene.",
+  "Device": "Living Room TV", "CreatedAt": "…", "Status": "fixed", "StatusLabel": "Fixed",
+  "CanWithdraw": false,
+  "History": [ { "At": "…", "Label": "Reported", "Status": null },
+               { "At": "…", "Label": "Fixed", "Status": "fixed" } ] }
 ```
+
+`ReasonCode` and each step's `Status` are codes a client can translate; `Status` is null on the
+filing step. The labels are English text for people.
 
 Refusal: 404 `report-not-found`, also for another user's report.
 

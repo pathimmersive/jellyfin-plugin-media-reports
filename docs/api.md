@@ -76,11 +76,13 @@ fix. Admin routes use the plugin's own names instead (`New`, `Investigating`,
 isn't installed.
 
 ```json
-{ "Version": "0.1.0.0", "ApiVersion": 1, "ReportingEnabled": true }
+{ "Version": "0.1.0.0", "ApiVersion": 1, "ReportingEnabled": true,
+  "ReportableTypes": ["Movie", "Episode", "Season", "Series"] }
 ```
 
 `ReportingEnabled` is false while the admin has turned reporting off. Filing is refused then, but
-a user can still read their reports.
+a user can still read their reports. `ReportableTypes` are the Jellyfin item types a report can be
+filed on; offer a Report button only on those.
 
 ## Filing and following reports
 
@@ -102,7 +104,8 @@ reports on this title. `Playback` is the playback a report would carry: the call
 of the item, preferring this device, or their most recent one. `State` is `Playing`, `Stopped` or
 `Ended`. It is null when there is none, and always null for a season or series.
 
-Refusals: 403 `reporting-off`; 404 `item-not-found` (unknown, or not visible to the caller).
+Refusals: 400 `item-not-reportable` (a type not in `ReportableTypes`, such as a song); 403
+`reporting-off`; 404 `item-not-found` (unknown, or not visible to the caller).
 
 ### `POST /MediaReports/Report`
 
@@ -127,6 +130,7 @@ Refusals:
 |---|---|---|
 | 400 | `reason-not-allowed` | The reason is unknown or retired. |
 | 400 | `note-too-long` | The note is over 1,000 characters. |
+| 400 | `item-not-reportable` | The item's type isn't in `ReportableTypes`, such as a song or a recording. |
 | 403 | `reporting-off` | The admin turned reporting off. |
 | 404 | `item-not-found` | The item is unknown, or the caller can't see it. |
 | 409 | `already-reported` | The caller already has an open report for this reason on this title. |

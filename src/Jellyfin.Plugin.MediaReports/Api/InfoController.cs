@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -19,7 +20,8 @@ public sealed class InfoController : ControllerBase
     public const int ApiVersion = 1;
 
     /// <summary>
-    /// Gets the plugin's version, the API version and whether reporting is on.
+    /// Gets the plugin's version, the API version, whether reporting is on and the item types a
+    /// report can be filed on.
     /// </summary>
     /// <returns>The information.</returns>
     [HttpGet]
@@ -27,7 +29,8 @@ public sealed class InfoController : ControllerBase
     public ActionResult<PluginInfo> Get() => new PluginInfo(
         typeof(Plugin).Assembly.GetName().Version?.ToString() ?? "0.0.0.0",
         ApiVersion,
-        Plugin.Instance?.Configuration?.ReportingEnabled ?? true);
+        Plugin.Instance?.Configuration?.ReportingEnabled ?? true,
+        ReportService.ReportableTypes);
 }
 
 /// <summary>
@@ -36,4 +39,5 @@ public sealed class InfoController : ControllerBase
 /// <param name="Version">The plugin's version.</param>
 /// <param name="ApiVersion">The API version.</param>
 /// <param name="ReportingEnabled">Whether reporting is turned on.</param>
-public sealed record PluginInfo(string Version, int ApiVersion, bool ReportingEnabled);
+/// <param name="ReportableTypes">The item types a report can be filed on.</param>
+public sealed record PluginInfo(string Version, int ApiVersion, bool ReportingEnabled, IReadOnlyList<string> ReportableTypes);

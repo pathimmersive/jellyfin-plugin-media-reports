@@ -29,6 +29,11 @@ public sealed class ReportService
     /// </summary>
     public const int MaxReportsPerHour = 30;
 
+    /// <summary>
+    /// The item types a report can be filed on.
+    /// </summary>
+    public static readonly IReadOnlyList<string> ReportableTypes = ["Movie", "Episode", "Season", "Series"];
+
     private readonly ILibraryManager _library;
     private readonly IUserManager _users;
     private readonly PlaybackCapture _capture;
@@ -84,6 +89,11 @@ public sealed class ReportService
             return NotFound<ReportContext>();
         }
 
+        if (!IsReportable(item))
+        {
+            return NotReportable<ReportContext>();
+        }
+
         var reasons = config.GetReasons();
         var playback = PickPlayback(userId, deviceId, item);
         return ServiceResult<ReportContext>.Success(new ReportContext
@@ -131,6 +141,11 @@ public sealed class ReportService
         if (item is null)
         {
             return NotFound<FiledReportView>();
+        }
+
+        if (!IsReportable(item))
+        {
+            return NotReportable<FiledReportView>();
         }
 
         if (!config.GetReasons().Any(r => !r.Retired && string.Equals(r.Code, request.ReasonCode, StringComparison.Ordinal)))
@@ -322,9 +337,10 @@ public sealed class ReportService
             return null;
         }
 
-        var item = _library.GetItemById<BaseItem>(itemId, user);
-        return item is Movie or Episode or Season or Series ? item : null;
+        return _library.GetItemById<BaseItem>(itemId, user);
     }
+
+    private static bool IsReportable(BaseItem item) => item is Movie or Episode or Season or Series;
 
     // A movie or episode carries the caller's live playback of it, preferring the calling
     // device, else their newest buffered one; a season or series carries none.
@@ -361,6 +377,9 @@ public sealed class ReportService
 
     private static ServiceResult<T> NotFound<T>() =>
         ServiceResult<T>.Refuse(Outcome.NotFound, "item-not-found", "That title isn't in your library.");
+
+    private static ServiceResult<T> NotReportable<T>() =>
+        ServiceResult<T>.Refuse(Outcome.BadRequest, "item-not-reportable", "Reports can be filed on movies, episodes, seasons and series only.");
 
     private static ServiceResult<T> ReportNotFound<T>() =>
         ServiceResult<T>.Refuse(Outcome.NotFound, "report-not-found", "You have no report with that id.");

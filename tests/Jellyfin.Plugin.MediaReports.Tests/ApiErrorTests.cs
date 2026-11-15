@@ -140,6 +140,8 @@ public sealed class ApiErrorTests : IAsyncLifetime
         Assert.Equal("1", Field(body, "ApiVersion"));
         Assert.Equal(typeof(Plugin).Assembly.GetName().Version!.ToString(), Field(body, "Version"));
         Assert.Equal("True", Field(body, "ReportingEnabled"));
+        var types = body.EnumerateObject().First(p => string.Equals(p.Name, "ReportableTypes", StringComparison.OrdinalIgnoreCase)).Value;
+        Assert.Equal(["Movie", "Episode", "Season", "Series"], types.EnumerateArray().Select(t => t.GetString()));
     }
 
     [Theory]

@@ -177,6 +177,7 @@ ok "Alice Phone" "$alice_phone" GET /MediaReports/Info | py -c '
 import json, sys
 d = json.load(sys.stdin)
 assert d["ApiVersion"] == 1 and d["Version"].count(".") == 3 and d["ReportingEnabled"] is True, d
+assert d["ReportableTypes"] == ["Movie", "Episode", "Season", "Series"], d
 print("Info: version %s, API version 1, reporting on" % d["Version"])' || fail "Info is wrong"
 expect 404 item-not-found "Alice Phone" "$alice_phone" GET "/MediaReports/Report/Context?itemId=$(py -c 'import uuid;print(uuid.uuid4())')"
 

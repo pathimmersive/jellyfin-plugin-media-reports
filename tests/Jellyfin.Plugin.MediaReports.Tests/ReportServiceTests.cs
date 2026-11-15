@@ -30,6 +30,7 @@ public sealed class ReportServiceTests : IDisposable
     private static readonly Guid SeriesId = Guid.NewGuid();
     private static readonly Guid EpisodeId = Guid.NewGuid();
     private static readonly Guid HiddenId = Guid.NewGuid();
+    private static readonly Guid SongId = Guid.NewGuid();
 
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "media-reports-tests", Guid.NewGuid().ToString("N"));
     private readonly ManualClock _clock = new();
@@ -68,6 +69,7 @@ public sealed class ReportServiceTests : IDisposable
             _library.Setup(m => m.GetItemById<BaseItem>(MovieId, user)).Returns(movie);
             _library.Setup(m => m.GetItemById<BaseItem>(SeriesId, user)).Returns(series);
             _library.Setup(m => m.GetItemById<BaseItem>(EpisodeId, user)).Returns(episode);
+            _library.Setup(m => m.GetItemById<BaseItem>(SongId, user)).Returns(new MediaBrowser.Controller.Entities.Audio.Audio { Id = SongId, Name = "Test Song" });
         }
 
         _library.Setup(m => m.GetItemById(SeriesId)).Returns(series);
@@ -223,6 +225,16 @@ public sealed class ReportServiceTests : IDisposable
 
         Assert.Equal(1, _store.GetReportCount());
         Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "audio", new string('x', 1000))));
+    }
+
+    [Fact]
+    public void ATitleOfAnotherType_IsRefusedAsNotReportable_AndNothingIsStored()
+    {
+        AssertRefused(_service.GetContext(_alice.Id, null, SongId), Outcome.BadRequest, "item-not-reportable");
+        AssertRefused(_service.File(_alice.Id, null, new FileReportRequest(SongId, "audio", null)), Outcome.BadRequest, "item-not-reportable");
+        AssertRefused(_service.File(_alice.Id, null, new FileReportRequest(HiddenId, "audio", null)), Outcome.NotFound, "item-not-found");
+        Assert.Equal(0, _store.GetReportCount());
+        Assert.Equal(["Movie", "Episode", "Season", "Series"], ReportService.ReportableTypes);
     }
 
     [Fact]

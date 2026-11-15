@@ -262,7 +262,7 @@ echo "Replaced – verify and unknown refused, long notes refused, Fixed with no
 echo "== Set status for all"
 ids="$(IFS=,; echo "${episode_issues[*]}")"
 expect 409 newer-open-issue "admin box" "$admin" POST /MediaReports/Admin/Issues/Status "{\"issueIds\":[$ids,$movie_issue],\"status\":\"new\"}"
-ok "admin box" "$admin" GET "/MediaReports/Admin/Issues/${episode_issues[0]}" | json "d['Status']" | grep -x New >/dev/null || fail "a refused Set status for all changed an issue"
+ok "admin box" "$admin" GET "/MediaReports/Admin/Issues/${episode_issues[0]}" | json "d['Status']" | grep -x new >/dev/null || fail "a refused Set status for all changed an issue"
 ok "admin box" "$admin" POST /MediaReports/Admin/Issues/Status "{\"issueIds\":[$ids],\"status\":\"investigating\"}" >/dev/null
 for i in "${episode_issues[@]}"; do
   ok "admin box" "$admin" GET "/MediaReports/Admin/Issues/$i" >"$work/results/episode.json"

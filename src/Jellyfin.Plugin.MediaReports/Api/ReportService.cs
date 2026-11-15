@@ -3,6 +3,8 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Jellyfin.Plugin.MediaReports.Configuration;
 using Jellyfin.Plugin.MediaReports.Playback;
 using Jellyfin.Plugin.MediaReports.Storage;
@@ -45,7 +47,7 @@ public sealed class ReportService
 
     // One user's filings run one at a time, so parallel requests can't pass the hourly limit
     // or the open-report check between the check and the insert.
-    private readonly ConcurrentDictionary<Guid, object> _filingGates = new();
+    private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _filingGates = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ReportService"/> class.
@@ -115,14 +117,44 @@ public sealed class ReportService
     /// <param name="userId">The caller.</param>
     /// <param name="deviceId">The caller's device.</param>
     /// <param name="request">The report.</param>
+    /// <param name="cancellationToken">Stops the wait for the user's gate.</param>
     /// <returns>The filed report, or a refusal.</returns>
-    public ServiceResult<FiledReportView> File(Guid userId, string? deviceId, FileReportRequest request)
+    public async Task<ServiceResult<FiledReportView>> FileAsync(Guid userId, string? deviceId, FileReportRequest request, CancellationToken cancellationToken = default)
     {
-        lock (_filingGates.GetOrAdd(userId, _ => new object()))
+        // A user already at the limit is refused at once, so a flood never queues at the gate.
+        if (RecentFilings(userId) >= MaxReportsPerHour)
+        {
+            return TooManyReports();
+        }
+
+        var gate = FilingGate(userId);
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
             return FileOne(userId, deviceId, request);
         }
+        finally
+        {
+            gate.Release();
+        }
     }
+
+    /// <summary>
+    /// Files a report and waits for the answer; for tests.
+    /// </summary>
+    /// <param name="userId">The caller.</param>
+    /// <param name="deviceId">The caller's device.</param>
+    /// <param name="request">The report.</param>
+    /// <returns>The filed report, or a refusal.</returns>
+    internal ServiceResult<FiledReportView> File(Guid userId, string? deviceId, FileReportRequest request) =>
+        FileAsync(userId, deviceId, request).GetAwaiter().GetResult();
+
+    /// <summary>
+    /// Gets the gate one user's filings pass through one at a time.
+    /// </summary>
+    /// <param name="userId">The user.</param>
+    /// <returns>The gate.</returns>
+    internal SemaphoreSlim FilingGate(Guid userId) => _filingGates.GetOrAdd(userId, _ => new SemaphoreSlim(1, 1));
 
     private ServiceResult<FiledReportView> FileOne(Guid userId, string? deviceId, FileReportRequest request)
     {
@@ -134,7 +166,7 @@ public sealed class ReportService
 
         if (RecentFilings(userId) >= MaxReportsPerHour)
         {
-            return ServiceResult<FiledReportView>.Refuse(Outcome.TooManyRequests, "too-many-reports", $"You've sent {MaxReportsPerHour} reports in the past hour. Try again later.");
+            return TooManyReports();
         }
 
         var item = FindItem(userId, request.ItemId);
@@ -377,6 +409,9 @@ public sealed class ReportService
 
     private static ServiceResult<T> NotFound<T>() =>
         ServiceResult<T>.Refuse(Outcome.NotFound, "item-not-found", "That title isn't in your library.");
+
+    private static ServiceResult<FiledReportView> TooManyReports() =>
+        ServiceResult<FiledReportView>.Refuse(Outcome.TooManyRequests, "too-many-reports", $"You've sent {MaxReportsPerHour} reports in the past hour. Try again later.");
 
     private static ServiceResult<T> NotReportable<T>() =>
         ServiceResult<T>.Refuse(Outcome.BadRequest, "item-not-reportable", "Reports can be filed on movies, episodes, seasons and series only.");

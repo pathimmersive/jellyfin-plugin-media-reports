@@ -263,6 +263,46 @@ public sealed class ReportServiceTests : IDisposable
         Assert.All(results.Where(r => r.Outcome != Outcome.Ok), r => Assert.Equal("too-many-reports", r.Code));
     }
 
+    [Fact]
+    public async Task FileAsync_WaitsForTheUsersGate_WithoutHoldingAThread()
+    {
+        var gate = _service.FilingGate(_alice.Id);
+        gate.Wait();
+        var calls = Task.Run(() => Enumerable.Range(0, 200)
+            .Select(_ => _service.FileAsync(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)))
+            .ToList());
+
+        Assert.True(calls.Wait(TimeSpan.FromSeconds(5)), "a filing held its caller's thread while the gate was taken");
+        Assert.All(calls.Result, t => Assert.False(t.IsCompleted));
+        gate.Release();
+        var results = await Task.WhenAll(calls.Result);
+
+        Assert.Equal(1, results.Count(r => r.Outcome == Outcome.Ok));
+    }
+
+    [Fact]
+    public void FileAsync_RefusesAUserAtTheLimit_WithoutWaitingForTheGate()
+    {
+        for (var i = 0; i < ReportService.MaxReportsPerHour; i++)
+        {
+            var filed = Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)));
+            Assert.Equal(Outcome.Ok, _service.Withdraw(_alice.Id, filed.Id).Outcome);
+        }
+
+        var gate = _service.FilingGate(_alice.Id);
+        gate.Wait();
+        try
+        {
+            var call = Task.Factory.StartNew(() => _service.FileAsync(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)), CancellationToken.None, TaskCreationOptions.None, TaskScheduler.Default);
+            Assert.True(call.Wait(TimeSpan.FromSeconds(5)) && call.Result.IsCompleted, "a filing past the limit waited for the gate");
+            AssertRefused(call.Result.Result, Outcome.TooManyRequests, "too-many-reports");
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
     private List<ServiceResult<FiledReportView>> FileInParallel(int count, Func<int, FileReportRequest> request)
     {
         using var start = new Barrier(count);

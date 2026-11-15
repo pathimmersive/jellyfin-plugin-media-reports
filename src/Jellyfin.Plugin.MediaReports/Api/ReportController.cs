@@ -72,7 +72,17 @@ public sealed class ReportController : ControllerBase
             return Forbid();
         }
 
-        return Answer(() => _service.File(userId.Value, deviceId, request), StatusCodes.Status201Created);
+        ServiceResult<FiledReportView> result;
+        try
+        {
+            result = await _service.FileAsync(userId.Value, deviceId, request, HttpContext.RequestAborted).ConfigureAwait(false);
+        }
+        catch (StorageUnavailableException)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new ApiError("storage-unavailable", "Reports can't be stored right now."));
+        }
+
+        return Answer(() => result, StatusCodes.Status201Created);
     }
 
     /// <summary>

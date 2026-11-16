@@ -221,6 +221,10 @@ echo "filing answers 201 with Location $location"
 [[ "$(req "Alice Phone" "$alice_phone" GET "/MediaReports/Report/Context?itemId=$item_id")" == 200 ]] || fail "context after filing"
 cp "$work/results/last.json" "$work/results/context-after.json"
 expect 409 already-reported "Alice Phone" "$alice_phone" POST /MediaReports/Report "{\"itemId\":\"$item_id\",\"reasonCode\":\"stutter\"}"
+[[ "$(json "d.get('ReportId')" <"$work/results/last.json")" == "$(json "d['Id']" <"$work/results/alice.json")" ]] \
+  || fail "already-reported does not name alice's open report: $(cat "$work/results/last.json")"
+expect 400 reason-not-allowed "Alice Phone" "$alice_phone" POST /MediaReports/Report "{\"itemId\":\"$item_id\",\"reasonCode\":\"nope\"}"
+[[ "$(json "'ReportId' in d" <"$work/results/last.json")" == False ]] || fail "a refusal other than already-reported names a report"
 expect 400 reason-not-allowed "Alice Phone" "$alice_phone" POST /MediaReports/Report "{\"itemId\":\"$item_id\",\"reasonCode\":\"nonsense\"}"
 long="$(py -c 'print("x" * 1001)')"
 expect 400 note-too-long "Alice Phone" "$alice_phone" POST /MediaReports/Report "{\"itemId\":\"$item_id\",\"reasonCode\":\"audio\",\"note\":\"$long\"}"
@@ -487,6 +491,11 @@ for _ in $(seq 30); do
   [[ "$(req "Carol Tablet" "$carol" DELETE "/MediaReports/Report/Mine/$id")" == 204 ]] || fail "carol could not withdraw report $id"
 done
 expect 429 too-many-reports "Carol Tablet" "$carol" POST /MediaReports/Report "{\"itemId\":\"$item_id\",\"reasonCode\":\"other\"}"
+retry="$(curl -sS -D - -o /dev/null -X POST "$api/MediaReports/Report" -H "Content-Type: application/json" \
+  -H "Authorization: $(auth "Carol Tablet" "$carol")" --data "{\"itemId\":\"$item_id\",\"reasonCode\":\"other\"}" |
+  tr -d '\r' | sed -n 's/^[Rr]etry-[Aa]fter: //p')"
+[[ "$retry" =~ ^[0-9]+$ ]] && (( retry > 3000 && retry <= 3600 )) || fail "the 429 says Retry-After '$retry', not the time left in the hour"
+echo "the 31st is refused with Retry-After $retry s"
 ok "Carol Tablet" "$carol" GET /MediaReports/Report/Mine | json "len(d['Reports'])" | grep -x 0 >/dev/null || fail "the refused report was kept"
 echo "30 filed and withdrawn, the 31st refused, carol has no reports"
 

@@ -213,6 +213,16 @@ public sealed class ReportController : ControllerBase
         return info.UserId.Equals(default) ? (null, null) : (info.UserId, info.DeviceId);
     }
 
+    private ObjectResult TooMany<T>(ServiceResult<T> result)
+    {
+        if (result.RetryAfterSeconds is { } seconds)
+        {
+            Response.Headers.RetryAfter = seconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        return StatusCode(StatusCodes.Status429TooManyRequests, new ApiError(result.Code!, result.Message!));
+    }
+
     private ObjectResult Answer<T>(Func<ServiceResult<T>> call, int successStatus)
     {
         ServiceResult<T> result;
@@ -231,8 +241,8 @@ public sealed class ReportController : ControllerBase
             Outcome.BadRequest => StatusCode(StatusCodes.Status400BadRequest, new ApiError(result.Code!, result.Message!)),
             Outcome.Forbidden => StatusCode(StatusCodes.Status403Forbidden, new ApiError(result.Code!, result.Message!)),
             Outcome.NotFound => StatusCode(StatusCodes.Status404NotFound, new ApiError(result.Code!, result.Message!)),
-            Outcome.TooManyRequests => StatusCode(StatusCodes.Status429TooManyRequests, new ApiError(result.Code!, result.Message!)),
-            _ => StatusCode(StatusCodes.Status409Conflict, new ApiError(result.Code!, result.Message!)),
+            Outcome.TooManyRequests => TooMany(result),
+            _ => StatusCode(StatusCodes.Status409Conflict, new ApiError(result.Code!, result.Message!, result.ReportId)),
         };
     }
 }

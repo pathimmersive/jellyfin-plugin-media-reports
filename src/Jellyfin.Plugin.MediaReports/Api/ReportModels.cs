@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 namespace Jellyfin.Plugin.MediaReports.Api;
 
@@ -38,6 +39,12 @@ public enum Outcome
 /// <param name="IssueIds">The issues a refusal names, when it names any.</param>
 public sealed record ServiceResult<T>(Outcome Outcome, T? Value = default, string? Code = null, string? Message = null, IReadOnlyList<long>? IssueIds = null)
 {
+    /// <summary>Gets the caller's open report a refusal names, such as the one an already-reported filing duplicates.</summary>
+    public long? ReportId { get; init; }
+
+    /// <summary>Gets how many seconds a refused caller waits before trying again, or null.</summary>
+    public int? RetryAfterSeconds { get; init; }
+
     /// <summary>
     /// A successful result.
     /// </summary>
@@ -78,7 +85,11 @@ public sealed record FileReportRequest(Guid ItemId, string ReasonCode, string? N
 /// </summary>
 /// <param name="Code">The error code.</param>
 /// <param name="Message">A short explanation.</param>
-public sealed record ApiError(string Code, string Message);
+/// <param name="ReportId">The caller's open report a refusal names; left out of the answer when null.</param>
+public sealed record ApiError(
+    string Code,
+    string Message,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? ReportId = null);
 
 /// <summary>
 /// What the user is about to report.

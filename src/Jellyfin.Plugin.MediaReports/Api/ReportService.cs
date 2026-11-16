@@ -136,7 +136,7 @@ public sealed class ReportService
         // A user already at the limit is refused at once, so a flood never queues at the gate.
         if (RecentFilings(userId) >= MaxReportsPerHour)
         {
-            return TooManyReports();
+            return TooManyReports(userId);
         }
 
         var gate = FilingGate(userId);
@@ -178,7 +178,7 @@ public sealed class ReportService
 
         if (RecentFilings(userId) >= MaxReportsPerHour)
         {
-            return TooManyReports();
+            return TooManyReports(userId);
         }
 
         var item = FindItem(userId, request.ItemId);
@@ -205,7 +205,9 @@ public sealed class ReportService
 
         if (_store.GetOpenReports(userId, item.Id).Any(r => string.Equals(r.ReasonCode, request.ReasonCode, StringComparison.Ordinal)))
         {
-            return ServiceResult<FiledReportView>.Refuse(Outcome.Conflict, "already-reported", "You already have an open report on this title for that reason.");
+            var open = _store.GetOpenReports(userId, item.Id).First(r => string.Equals(r.ReasonCode, request.ReasonCode, StringComparison.Ordinal));
+            return ServiceResult<FiledReportView>.Refuse(Outcome.Conflict, "already-reported", "You already have an open report on this title for that reason.")
+                with { ReportId = open.ReportId };
         }
 
         var playback = PickPlayback(userId, deviceId, item);
@@ -470,8 +472,24 @@ public sealed class ReportService
     private static ServiceResult<T> NotFound<T>() =>
         ServiceResult<T>.Refuse(Outcome.NotFound, "item-not-found", "That title isn't in your library.");
 
-    private static ServiceResult<FiledReportView> TooManyReports() =>
-        ServiceResult<FiledReportView>.Refuse(Outcome.TooManyRequests, "too-many-reports", $"You've sent {MaxReportsPerHour} reports in the past hour. Try again later.");
+    private ServiceResult<FiledReportView> TooManyReports(Guid userId) =>
+        ServiceResult<FiledReportView>.Refuse(Outcome.TooManyRequests, "too-many-reports", $"You've sent {MaxReportsPerHour} reports in the past hour. Try again later.")
+            with { RetryAfterSeconds = SecondsUntilAFilingLeavesTheHour(userId) };
+
+    // When the oldest filing in the past hour leaves the window, a filing is accepted again.
+    private int SecondsUntilAFilingLeavesTheHour(Guid userId)
+    {
+        lock (_recentFilings)
+        {
+            if (!_recentFilings.TryGetValue(userId, out var times) || times.Count == 0)
+            {
+                return 1;
+            }
+
+            var wait = times.Peek() + TimeSpan.FromHours(1) - _time.GetUtcNow();
+            return Math.Max(1, (int)Math.Ceiling(wait.TotalSeconds));
+        }
+    }
 
     private static ServiceResult<T> NotReportable<T>() =>
         ServiceResult<T>.Refuse(Outcome.BadRequest, "item-not-reportable", "Reports can be filed on movies, episodes, seasons and series only.");

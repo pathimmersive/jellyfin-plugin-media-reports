@@ -143,8 +143,8 @@ Refusals:
 | 400 | `item-not-reportable` | The item's type isn't in `ReportableTypes`, such as a song or a recording. |
 | 403 | `reporting-off` | The admin turned reporting off. |
 | 404 | `item-not-found` | The item is unknown, or the caller can't see it. |
-| 409 | `already-reported` | The caller already has an open report for this reason on this title. |
-| 429 | `too-many-reports` | The caller filed 30 reports in the past hour, withdrawn ones included. |
+| 409 | `already-reported` | The caller already has an open report for this reason on this title. `ReportId` names it, so a client can open it instead. |
+| 429 | `too-many-reports` | The caller filed 30 reports in the past hour, withdrawn ones included. The `Retry-After` header gives the seconds until a filing is accepted again. |
 
 One user's filings are handled one at a time, so requests sent together still meet the limit and
 the one-open-report-per-reason rule.
@@ -277,7 +277,8 @@ Fields of `SourceStreams`:
 
 ### `POST /MediaReports/Client/Loaded`
 
-*User.* Records that the Report button loaded in the caller's app. The app is the `Client` and
+*User.* Only the Report button script in Jellyfin's web client calls it; a native client doesn't
+need to. Records that the Report button loaded in the caller's app. The app is the `Client` and
 `Version` in the caller's `Authorization` header. Any body is ignored. At most one load per app
 is kept per minute. Answers 204.
 

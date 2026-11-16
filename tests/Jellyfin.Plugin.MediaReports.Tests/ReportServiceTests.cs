@@ -278,6 +278,69 @@ public sealed class ReportServiceTests : IDisposable
     }
 
     [Fact]
+    public void TheHourlyLimit_SaysWhenAFilingIsAcceptedAgain()
+    {
+        for (var i = 0; i < ReportService.MaxReportsPerHour; i++)
+        {
+            var filed = Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)));
+            Assert.Equal(Outcome.Ok, _service.Withdraw(_alice.Id, filed.Id).Outcome);
+            _clock.Advance(TimeSpan.FromMinutes(1));
+        }
+
+        var refused = _service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null));
+        AssertRefused(refused, Outcome.TooManyRequests, "too-many-reports");
+        Assert.Equal(1800, refused.RetryAfterSeconds);
+
+        _clock.Advance(TimeSpan.FromSeconds(1799));
+        Assert.Equal(1, _service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)).RetryAfterSeconds);
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        Assert.Equal(Outcome.Ok, _service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)).Outcome);
+    }
+
+    [Fact]
+    public void AlreadyReported_NamesTheOpenReport_AndNoOtherRefusalNamesOne()
+    {
+        var first = Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)));
+
+        var again = _service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null));
+        AssertRefused(again, Outcome.Conflict, "already-reported");
+        Assert.Equal(first.Id, again.ReportId);
+        Assert.Equal(Outcome.Ok, _service.MineDetail(_alice.Id, again.ReportId!.Value).Outcome);
+
+        Assert.Null(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "nonsense", null)).ReportId);
+        Assert.Null(_service.File(_bob.Id, null, new FileReportRequest(MovieId, "audio", new string('a', 1001))).ReportId);
+    }
+
+    [Fact]
+    public async Task Refusals_CarryRetryAfter_AndTheOpenReportsId_OverHttp()
+    {
+        var authorization = new Mock<IAuthorizationContext>();
+        authorization.Setup(m => m.GetAuthorizationInfo(It.IsAny<HttpContext>())).ReturnsAsync(new AuthorizationInfo { User = _alice, DeviceId = "phone-id" });
+        ReportController Controller(out DefaultHttpContext http)
+        {
+            http = new DefaultHttpContext();
+            return new ReportController(_service, authorization.Object) { ControllerContext = new ControllerContext { HttpContext = http } };
+        }
+
+        var filed = (await Controller(out _).File(new FileReportRequest(MovieId, "stutter", null))).Result as ObjectResult;
+        var duplicate = (await Controller(out _).File(new FileReportRequest(MovieId, "stutter", null))).Result as ObjectResult;
+        Assert.Equal(StatusCodes.Status409Conflict, duplicate!.StatusCode);
+        Assert.Equal(((FiledReportView)filed!.Value!).Id, Assert.IsType<ApiError>(duplicate.Value).ReportId);
+        Assert.DoesNotContain("ReportId", JsonSerializer.Serialize(new ApiError("note-too-long", "Too long.")), StringComparison.Ordinal);
+
+        // The first filing counts; 29 more, each withdrawn, reach the limit.
+        for (var i = 1; i < ReportService.MaxReportsPerHour; i++)
+        {
+            var other = Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "other", null)));
+            Assert.Equal(Outcome.Ok, _service.Withdraw(_alice.Id, other.Id).Outcome);
+        }
+
+        var tooMany = (await Controller(out var http).File(new FileReportRequest(MovieId, "audio", null))).Result as ObjectResult;
+        Assert.Equal(StatusCodes.Status429TooManyRequests, tooMany!.StatusCode);
+        Assert.Equal("3600", http.Response.Headers.RetryAfter.ToString());
+    }
+
+    [Fact]
     public void File_ForASeries_HasNoSnapshot()
     {
         Play("tv", _alice, "Living Room TV");

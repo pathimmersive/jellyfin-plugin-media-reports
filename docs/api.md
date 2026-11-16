@@ -349,6 +349,10 @@ first (`At`, `Kind`, `Detail`, `ActorName`); `ServerId`; and `File`, read from J
 or series its folder and `EpisodeCount`. When the item is gone, `InLibrary` is false and `Path`
 is the one stored with the newest report.
 
+A history `Kind` is one of these codes: `filed`, `withdrawn`, `status-changed`, `note-added`,
+`action-run` (a Refresh or Scan), `relinked` (moved to a replaced file), `anonymised` (the
+reporter was deleted from the server) and `purged`. `Detail` is English text for people.
+
 Refusal: 404 `issue-not-found`.
 
 ### `PATCH /MediaReports/Admin/Issues/{id}`
@@ -385,7 +389,7 @@ refused issue, and nothing changes.
 ### `POST /MediaReports/Admin/Issues/{id}/Refresh`
 
 Queues Jellyfin's metadata refresh of the issue's title, filling missing metadata and images.
-Answers 202 at once.
+Answers 202 at once, with no body.
 
 Refusals: 404 `issue-not-found`; 404 `not-in-library` (the title is gone).
 
@@ -393,29 +397,30 @@ Refusals: 404 `issue-not-found`; 404 `not-in-library` (the title is gone).
 
 Queues Jellyfin's scan for new and changed files in the folder that holds the title: an
 episode's season folder, or a season's or series' own folder. For a movie it refreshes the movie,
-which rereads its file. Never the whole library. Answers 202 at once.
+which rereads its file. Never the whole library. Answers 202 at once, with no body.
 
 Refusals: 404 `issue-not-found`; 404 `not-in-library`.
 
-### `GET /MediaReports/Admin/Findings?kind=<kind>`
+### `GET /MediaReports/Admin/Findings?kind=<kind>&page=<n>`
 
 Suspected problems the plugin noticed during playback, without anyone reporting them. `Kinds`
 gives each kind's count over the past 7 days. `Rows` lists findings not dismissed, newest first,
-at most 200.
+50 a page; `page` starts at 1, and `Total` counts every page.
 
 ```json
 { "Kinds": [ { "Kind": "slow-transcode", "Label": "Transcoder too slow", "Count": 3 } ],
   "Rows": [ { "Id": 4, "Kind": "slow-transcode", "KindLabel": "Transcoder too slow", "ItemId": "…", "Title": "Test Movie",
     "Line": null, "UserName": "alice", "Device": "Living Room TV", "Client": "Jellyfin Roku",
-    "FirstSeen": "…", "LastSeen": "…", "Detail": "Transcoding at 14.2 fps against 23.98 fps for 45 s", "OtherDevices": 1 } ] }
+    "FirstSeen": "…", "LastSeen": "…", "Detail": "Transcoding at 14.2 fps against 23.98 fps for 45 s", "OtherDevices": 1 } ],
+  "Page": 1, "PageSize": 50, "Total": 1 }
 ```
 
 Kinds: `freezing`, `slow-transcode`, `low-quality`, `playback-error`.
-Refusal: 400 `unknown-kind`.
+Refusals: 400 `unknown-kind`; 400 `bad-query` for a page below 1.
 
 ### `POST /MediaReports/Admin/Findings/{id}/Dismiss`
 
-Hides a finding. Answers 204. Refusal: 404 `finding-not-found`.
+Hides a finding. Answers 204, with no body. Refusal: 404 `finding-not-found`.
 
 ### `GET /MediaReports/Admin/Settings`
 

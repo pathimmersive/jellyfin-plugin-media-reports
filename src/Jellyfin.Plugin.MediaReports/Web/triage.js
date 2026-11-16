@@ -438,9 +438,16 @@ function suspectedPage(params, list, refresh) {
         });
         return card;
     });
+    const pages = Math.max(1, Math.ceil(list.Total / list.PageSize));
+    const go = (page) => { location.hash = pageUrl({ tab: 'suspected', kind, page: page === 1 ? null : page }).slice(1); };
+    const pager = pages > 1 ? h('nav', { className: 'mrPaging', 'aria-label': 'Pages' },
+        h('span', { className: 'mrMuted mrPageOf' }, `Page ${list.Page} of ${pages}`),
+        h('button', { type: 'button', className: 'mrBtn', disabled: list.Page <= 1, onclick: () => go(list.Page - 1) }, 'Previous'),
+        h('button', { type: 'button', className: 'mrBtn', disabled: list.Page >= pages, onclick: () => go(list.Page + 1) }, 'Next')) : null;
     return h('div', null, tiles,
         label ? h('p', { className: 'mrFaint' }, `Only ${label.Label}. `, h('a', { href: pageUrl({ tab: 'suspected' }) }, 'Show all kinds')) : null,
-        rows.length ? h('ul', { className: 'mrFindings' }, rows) : h('div', { className: 'mrPanel mrEmpty' }, h('p', null, 'None of this kind.')));
+        rows.length ? h('ul', { className: 'mrFindings' }, rows) : h('div', { className: 'mrPanel mrEmpty' }, h('p', null, 'None of this kind.')),
+        pager);
 }
 
 function noMatch(params, navigate) {
@@ -600,11 +607,11 @@ function historyLine(event) {
             return `Reported by ${who || 'a deleted user'}`;
         case 'withdrawn':
             return `Report withdrawn by ${who || 'a deleted user'}`;
-        case 'status changed':
+        case 'status-changed':
             return `${event.Detail || 'Status changed'}, by ${who || 'Media Reports'}`;
-        case 'note added':
+        case 'note-added':
             return `Notes changed by ${who || 'a deleted user'}`;
-        case 'action run':
+        case 'action-run':
             return `${event.Detail || 'Action run'}, by ${who || 'a deleted user'}`;
         case 'anonymised':
             return 'Reporter deleted from the server';
@@ -707,7 +714,8 @@ function issuePage(params, issue, navigate) {
         message.appendChild(typeof text === 'string' ? document.createTextNode(text) : text);
     };
     const reload = () => navigate(Object.assign({}, listParams(params), { issue: issue.Id }), true);
-    const action = (path, started) => () => call('POST', `Issues/${issue.Id}/${path}`).then(() => {
+    // Refresh and Scan answer 202 with no body, so it is not read as JSON.
+    const action = (path, started) => () => ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl(`${API}Issues/${issue.Id}/${path}`) }).then(() => {
         pending = started;
         reload();
     }, (failure) => refusal(failure).then((r) => say(r.code === 'not-in-library' ? 'This title is no longer in the library.' : "That couldn't be started.", true)));
@@ -1171,7 +1179,8 @@ export default function (view) {
                     tab.textContent = summary.Suspected || 0;
                 }
             }, () => null);
-            Promise.all([call('GET', 'Findings', params.kind ? { kind: params.kind } : {}), call('GET', 'Summary')]).then(([list, summary]) => {
+            const findingsQuery = Object.assign(params.kind ? { kind: params.kind } : {}, params.page ? { page: params.page } : {});
+            Promise.all([call('GET', 'Findings', findingsQuery), call('GET', 'Summary')]).then(([list, summary]) => {
                 if (mine === generation) {
                     root.textContent = '';
                     root.appendChild(header(summary));

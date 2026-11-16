@@ -390,7 +390,7 @@ with sync_playwright() as p:
     page.locator(V + "tr.mrSetAll select").select_option("investigating")
     page.wait_for_function("() => [...document.querySelectorAll('.page:not(.hide) tr.mrSeasonRow .mrPill')].some(p => p.textContent === 'Investigating')", timeout=WAIT_MS)
     statuses = [ok("GET", "/MediaReports/Admin/Issues/%s" % i, ADMIN) for i in season_issues]
-    check(all(s["Status"] == "investigating" and s["History"][-1]["Kind"] == "status changed" for s in statuses),
+    check(all(s["Status"] == "investigating" and s["History"][-1]["Kind"] == "status-changed" for s in statuses),
           "Set status for all makes every episode Investigating, each with its own history line")
 
     # Views.

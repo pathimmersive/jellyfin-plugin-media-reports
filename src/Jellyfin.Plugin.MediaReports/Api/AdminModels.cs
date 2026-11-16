@@ -22,8 +22,17 @@ public sealed record FindingList
     /// <summary>Gets the kinds in order, each with its label and 7-day count.</summary>
     public IReadOnlyList<FindingKind> Kinds { get; init; } = [];
 
-    /// <summary>Gets the findings not dismissed, newest first.</summary>
+    /// <summary>Gets one page of the findings not dismissed, newest first.</summary>
     public IReadOnlyList<FindingRow> Rows { get; init; } = [];
+
+    /// <summary>Gets the page, from 1.</summary>
+    public int Page { get; init; }
+
+    /// <summary>Gets the most findings a page holds.</summary>
+    public int PageSize { get; init; }
+
+    /// <summary>Gets how many findings not dismissed there are, across every page.</summary>
+    public int Total { get; init; }
 }
 
 /// <summary>
@@ -306,7 +315,7 @@ public sealed record IssueReport
 /// One line of an issue's history.
 /// </summary>
 /// <param name="At">When.</param>
-/// <param name="Kind">What: filed, withdrawn, status changed, note added, action run or relinked.</param>
+/// <param name="Kind">What, as a code: filed, withdrawn, status-changed, note-added, action-run, relinked, anonymised or purged.</param>
 /// <param name="Detail">A short detail.</param>
 /// <param name="ActorName">Who; null for Media Reports itself or a deleted user.</param>
 public sealed record IssueEvent(DateTimeOffset At, string Kind, string? Detail, string? ActorName);

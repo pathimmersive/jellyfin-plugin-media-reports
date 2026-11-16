@@ -179,7 +179,7 @@ public sealed class AdminServiceTests : IDisposable
         Assert.Equal(("keeps jumping back", "Transcode", 600_000_000L), (alice.Note, alice.PlayMethod, alice.PositionTicks!.Value));
         Assert.Equal("Living Room TV", alice.Snapshot!.Value.GetProperty("deviceName").GetString());
         Assert.Null(detail.Reports[0].Snapshot);
-        Assert.Equal([("filed", "alice"), ("filed", "bob"), ("status changed", "admin")], detail.History.Select(h => (h.Kind, h.ActorName!)));
+        Assert.Equal([("filed", "alice"), ("filed", "bob"), ("status-changed", "admin")], detail.History.Select(h => (h.Kind, h.ActorName!)));
         Assert.Equal((2, "server-1", "investigating"), (detail.People, detail.ServerId, detail.Status));
 
         var file = detail.File;
@@ -220,7 +220,7 @@ public sealed class AdminServiceTests : IDisposable
         Assert.Null(_store.GetIssue(issue)!.AdminNotes);
         var fixedIssue = Value(_service.UpdateIssue(issue, new IssuePatch("fixed", null), _admin.Id));
         Assert.Equal(("fixed", _clock.GetUtcNow()), (fixedIssue.Status, fixedIssue.ClosedAt!.Value));
-        Assert.Equal(("status changed", "New → Fixed", "admin"), (fixedIssue.History[^1].Kind, fixedIssue.History[^1].Detail, fixedIssue.History[^1].ActorName!));
+        Assert.Equal(("status-changed", "New → Fixed", "admin"), (fixedIssue.History[^1].Kind, fixedIssue.History[^1].Detail, fixedIssue.History[^1].ActorName!));
 
         var reopened = Value(_service.UpdateIssue(issue, new IssuePatch("investigating", null), _admin.Id));
         Assert.Equal(("investigating", (DateTimeOffset?)null), (reopened.Status, reopened.ClosedAt));
@@ -249,7 +249,7 @@ public sealed class AdminServiceTests : IDisposable
         Assert.Equal("notes-too-long", _service.UpdateIssue(issue, new IssuePatch(null, new string('x', 10001)), _admin.Id).Code);
         var saved = Value(_service.UpdateIssue(issue, new IssuePatch(null, new string('x', 10000)), _admin.Id));
         Assert.Equal(10000, saved.Notes!.Length);
-        Assert.Equal(("note added", "admin"), (saved.History[^1].Kind, saved.History[^1].ActorName!));
+        Assert.Equal(("note-added", "admin"), (saved.History[^1].Kind, saved.History[^1].ActorName!));
 
         var again = Value(_service.UpdateIssue(issue, new IssuePatch(null, new string('x', 10000)), _admin.Id));
         Assert.Equal(saved.History.Count, again.History.Count);
@@ -429,6 +429,66 @@ public sealed class AdminServiceTests : IDisposable
         Assert.Empty(Value(_service.ListFindings(null)).Rows);
         Assert.Equal(0, Value(_service.ListFindings(null)).Kinds.Sum(k => k.Count));
         Assert.Equal(Outcome.NotFound, _service.DismissFinding(id + 100).Outcome);
+    }
+
+    [Theory]
+    [InlineData("filed", "filed")]
+    [InlineData("withdrawn", "withdrawn")]
+    [InlineData("status changed", "status-changed")]
+    [InlineData("note added", "note-added")]
+    [InlineData("action run", "action-run")]
+    [InlineData("relinked", "relinked")]
+    [InlineData("anonymised", "anonymised")]
+    [InlineData("purged", "purged")]
+    public void HistoryKinds_AreAnsweredAsKebabCaseCodes(string stored, string code) =>
+        Assert.Equal(code, AdminService.EventCode(stored));
+
+    [Fact]
+    public void AnIssuesHistory_GivesCodes_WhileTheStoreKeepsItsValues()
+    {
+        var issue = File(_alice, MovieId, "metadata").IssueId;
+        Assert.Equal(Outcome.Ok, _service.Refresh(issue, _admin.Id).Outcome);
+
+        Assert.Equal(["filed", "action-run"], Value(_service.GetIssue(issue)).History.Select(h => h.Kind));
+        Assert.Equal(["filed", "action run"], _store.GetIssueEvents(issue).Select(e => e.Kind));
+    }
+
+    [Fact]
+    public void Findings_ArePagedFiftyAtATime_WithTheirTotal_AndTheKindCountsOnEveryPage()
+    {
+        var movie = Guid.NewGuid();
+        for (var i = 0; i < 120; i++)
+        {
+            Finding("freezing", $"p{i}", movie, "Living Room TV");
+            _clock.Advance(TimeSpan.FromSeconds(1));
+        }
+
+        var first = Value(_service.ListFindings(null));
+        var third = Value(_service.ListFindings(null, 3));
+
+        Assert.Equal((1, 50, 120, 50), (first.Page, first.PageSize, first.Total, first.Rows.Count));
+        Assert.Equal((3, 120, 20), (third.Page, third.Total, third.Rows.Count));
+        Assert.Equal(first.Kinds, third.Kinds);
+        Assert.Empty(first.Rows.Select(r => r.Id).Intersect(third.Rows.Select(r => r.Id)));
+        Assert.Equal(120, Value(_service.ListFindings("freezing")).Total);
+        Assert.Equal(0, Value(_service.ListFindings("low-quality")).Total);
+        Assert.Equal(Outcome.BadRequest, _service.ListFindings(null, 0).Outcome);
+    }
+
+    [Fact]
+    public async Task Dismiss_AndSummarySeen_AnswerWithNoBody()
+    {
+        Finding("freezing", "s1", Guid.NewGuid(), "Living Room TV");
+        var id = Value(_service.ListFindings(null)).Rows.Single().Id;
+        var authorization = new Mock<IAuthorizationContext>();
+        authorization.Setup(m => m.GetAuthorizationInfo(It.IsAny<HttpContext>())).ReturnsAsync(new AuthorizationInfo { User = _admin });
+        var settings = new SettingsService(_store, () => _config, _ => { });
+        var alerts = new ReportAlerts(() => new System.Net.Http.HttpClient(), Mock.Of<MediaBrowser.Model.Activity.IActivityManager>(), () => _config, () => "http://localhost:8096", _clock, NullLogger<ReportAlerts>.Instance);
+        var controller = new AdminController(_service, settings, alerts, authorization.Object) { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() } };
+
+        // A bare status result writes no body; an object result would write "null".
+        Assert.Equal(StatusCodes.Status204NoContent, Assert.IsType<StatusCodeResult>(controller.DismissFinding(id)).StatusCode);
+        Assert.Equal(StatusCodes.Status204NoContent, Assert.IsType<StatusCodeResult>(await controller.MarkSummarySeen()).StatusCode);
     }
 
     private void Finding(string kind, string playback, Guid item, string device) =>

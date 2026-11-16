@@ -727,13 +727,14 @@ public sealed class ReportStore
     /// </summary>
     /// <param name="kind">Only this kind, or null for all.</param>
     /// <param name="limit">The most to return.</param>
+    /// <param name="offset">How many to skip, newest first.</param>
     /// <returns>The findings.</returns>
-    public IReadOnlyList<StoredFinding> GetFindings(string? kind, int limit)
+    public IReadOnlyList<StoredFinding> GetFindings(string? kind, int limit, int offset = 0)
     {
         using var connection = _db.OpenConnection();
         return Rows(
             connection,
-            "SELECT * FROM finding WHERE dismissed_at IS NULL AND ($kind IS NULL OR kind = $kind) ORDER BY last_seen DESC, id DESC LIMIT $limit",
+            "SELECT * FROM finding WHERE dismissed_at IS NULL AND ($kind IS NULL OR kind = $kind) ORDER BY last_seen DESC, id DESC LIMIT $limit OFFSET $offset",
             r => new StoredFinding
             {
                 Id = r.GetInt64(r.GetOrdinal("id")),
@@ -752,7 +753,22 @@ public sealed class ReportStore
                 Detail = r.GetString(r.GetOrdinal("detail")),
             },
             ("$kind", kind),
-            ("$limit", limit));
+            ("$limit", limit),
+            ("$offset", offset));
+    }
+
+    /// <summary>
+    /// Counts the findings not dismissed, optionally of one kind.
+    /// </summary>
+    /// <param name="kind">Only this kind, or null for all.</param>
+    /// <returns>The count.</returns>
+    public int CountFindings(string? kind)
+    {
+        using var connection = _db.OpenConnection();
+        return (int)Scalar<long>(
+            connection,
+            "SELECT COUNT(*) FROM finding WHERE dismissed_at IS NULL AND ($kind IS NULL OR kind = $kind)",
+            ("$kind", kind));
     }
 
     /// <summary>

@@ -1,10 +1,10 @@
 {
   "category": "General",
   "changelog": "",
-  "description": "Lets users report problems with a movie, show, season or episode, with playback diagnostics attached, and gives the admin a place to triage them. Not Jellyfin's Reports plugin, which makes library and activity reports.",
+  "description": "Lets users report problems with a movie, show, season or episode, with playback diagnostics attached, notices suspected playback problems on every app, TV apps included, without anyone reporting, and gives the admin one place to triage both. Not Jellyfin's Reports plugin, which makes library and activity reports.",
   "guid": "3a96edc1-4775-492e-ba6c-c0d8abc88662",
   "name": "Media Reports",
-  "overview": "Report playback and media problems to the server admin",
+  "overview": "Users report playback problems, and suspected ones are spotted on every app",
   "owner": "pathimmersive",
   "targetAbi": "12.0.0.0",
   "timestamp": "2026-10-21T00:00:00Z",

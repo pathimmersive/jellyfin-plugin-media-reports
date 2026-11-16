@@ -7,6 +7,8 @@
 
 # Media Reports for Jellyfin
 
+[![CI](https://github.com/pathimmersive/jellyfin-plugin-media-reports/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/pathimmersive/jellyfin-plugin-media-reports/actions/workflows/ci.yml)
+
 Media Reports is a Jellyfin server plugin for finding out when playback goes wrong for the people who use your server. Users report a problem with a movie, show, season or episode from a Report button in the app. The plugin also watches playback on every app, TV apps included, and lists what looks wrong without anyone pressing a button. You work both from one page in the Dashboard.
 
 Each report carries the playback details the server already knows: the app and device, direct play or transcode and why, the codecs and the position. The user only picks a reason.

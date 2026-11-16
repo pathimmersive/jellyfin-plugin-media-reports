@@ -60,6 +60,7 @@ if [[ -s README.md ]]; then
   contains README.md "suspected problems? (watching )?(is|are) on by default" "say suspected-problem watching is on by default"
   contains README.md "docs/data\.md" "link what the plugin stores"
   contains README.md "CHANGELOG\.md" "link the changelog"
+  contains README.md "actions/workflows/ci\.yml/badge\.svg\?branch=main" "show the CI status badge"
   contains README.md "not Jellyfin's Reports plugin.*github\.com/jellyfin/jellyfin-plugin-reports" "say it is not Jellyfin's Reports plugin, with a link"
   contains README.md "sha256sum -c .*SHA256SUMS" "say how to check a download against SHA256SUMS"
   contains README.md "gh attestation verify .*--repo pathimmersive/jellyfin-plugin-media-reports" "say how to verify a download's build provenance"
@@ -69,6 +70,7 @@ if [[ -s README.md ]]; then
   done < <(grep -oE 'assets/screenshots/[A-Za-z0-9._-]+\.png' README.md | sort -u)
   grep -q 'assets/screenshots/' README.md || fail "README.md shows no screenshots"
 fi
+contains src/Jellyfin.Plugin.MediaReports/meta.json "\"(overview|description)\": *\"[^\"]*suspected" "tell the catalog about suspected problems"
 contains src/Jellyfin.Plugin.MediaReports/meta.json "\"(overview|description)\": *\"[^\"]*not Jellyfin's Reports plugin" "tell the catalog it is not Jellyfin's Reports plugin"
 if [[ -s docs/data.md ]]; then
   contains docs/data.md "^# What the plugin stores" "open with its title"

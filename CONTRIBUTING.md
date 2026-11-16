@@ -8,6 +8,10 @@ Thanks for helping. Bug reports, ideas and pull requests are all welcome.
 - **Security problems:** do not open a public issue; see [SECURITY.md](SECURITY.md).
 - **Conduct:** everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
+## Who maintains it
+
+Path Immersive ([@pathimmersive](https://github.com/pathimmersive)) maintains the plugin: one maintainer, in spare time. The project is in early releases. An issue or pull request gets a first answer within 14 days; security reports follow [SECURITY.md](SECURITY.md).
+
 ## Building and testing
 
 You need the .NET 10 SDK (pinned in `global.json`), Docker, and Node.js 22 or later for the compatibility check.

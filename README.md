@@ -179,6 +179,10 @@ bash scripts/repo-install-check.sh   # install it from a local plugin repository
 
 `scripts/package.sh` builds a release zip and its manifest entry. See [CONTRIBUTING.md](CONTRIBUTING.md) for how changes are made.
 
+## Project status
+
+Maintained by Path Immersive ([@pathimmersive](https://github.com/pathimmersive)), one maintainer working in spare time. Status: early releases. The API is version 1 and stays compatible within it ([docs/api.md](docs/api.md)). An issue or pull request gets a first answer within 14 days, and a security report is acknowledged within 7 days ([SECURITY.md](SECURITY.md)).
+
 ## License
 
 [GPL-3.0-or-later](LICENSE). Third-party components are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

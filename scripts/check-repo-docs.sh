@@ -72,6 +72,13 @@ if [[ -s README.md ]]; then
 fi
 contains src/Jellyfin.Plugin.MediaReports/meta.json "\"(overview|description)\": *\"[^\"]*suspected" "tell the catalog about suspected problems"
 contains src/Jellyfin.Plugin.MediaReports/meta.json "\"(overview|description)\": *\"[^\"]*not Jellyfin's Reports plugin" "tell the catalog it is not Jellyfin's Reports plugin"
+# Who runs the project and what a reporter can expect.
+contains README.md "Maintained by Path Immersive.*@pathimmersive.*one maintainer" "name the maintainer"
+contains README.md "Status: early releases" "give the project's status"
+contains CONTRIBUTING.md "Path Immersive.*@pathimmersive.*one maintainer" "name the maintainer"
+contains CONTRIBUTING.md "first answer within 14 days" "say how soon an issue or pull request gets an answer"
+contains SECURITY.md "acknowledged within 7 days" "say how soon a security report is acknowledged"
+contains CODE_OF_CONDUCT.md "takes conduct reports too.*Conduct report" "say the private form takes conduct reports"
 if [[ -s docs/data.md ]]; then
   contains docs/data.md "^# What the plugin stores" "open with its title"
 else

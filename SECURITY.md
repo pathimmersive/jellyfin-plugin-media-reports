@@ -14,6 +14,6 @@ Include:
 - the plugin and Jellyfin versions affected;
 - steps to reproduce, or a proof of concept.
 
-This is a volunteer project. Reports are acknowledged as soon as a maintainer sees them, and a fix is released before the details are made public.
+This is a volunteer project with one maintainer. A report is acknowledged within 7 days, and a fix is released before the details are made public.
 
 Vulnerabilities in Jellyfin itself belong to the [Jellyfin project](https://github.com/jellyfin/jellyfin/security), not here.

@@ -60,6 +60,8 @@ if [[ -s README.md ]]; then
   contains README.md "suspected problems? (watching )?(is|are) on by default" "say suspected-problem watching is on by default"
   contains README.md "docs/data\.md" "link what the plugin stores"
   contains README.md "CHANGELOG\.md" "link the changelog"
+  contains README.md "sha256sum -c .*SHA256SUMS" "say how to check a download against SHA256SUMS"
+  contains README.md "gh attestation verify .*--repo pathimmersive/jellyfin-plugin-media-reports" "say how to verify a download's build provenance"
   # Every screenshot the README shows exists.
   while IFS= read -r shot; do
     [[ -s "$shot" ]] || fail "README.md shows $shot, which is missing"

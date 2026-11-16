@@ -8,6 +8,7 @@
 #
 # The version's CHANGELOG.md entry becomes the changelog in the manifest entry and in the
 # packaged meta.json; a version with no entry fails. CHANGELOG_FILE names another file.
+# SHA256SUMS beside them lets anyone check a download with `sha256sum -c SHA256SUMS`.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -37,3 +38,4 @@ dotnet publish src/Jellyfin.Plugin.MediaReports --nologo -c Release \
   -p:AssemblyVersion="$version" -p:FileVersion="$version" -o "$publish_dir"
 dotnet run scripts/release-tool.cs -- package --publish-dir "$publish_dir" --version "$version" \
   --out "$out_dir" --source-url-base "$3" --changelog-file "$changelog_file"
+(cd "$out_dir" && sha256sum "media-reports_${version}.zip" "media-reports_${version}.json" >SHA256SUMS)

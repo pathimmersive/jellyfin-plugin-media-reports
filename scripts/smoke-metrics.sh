@@ -179,7 +179,8 @@ metrics_url="$(ok "$(admin_auth)" GET /MediaReports/Admin/Settings | json "d['Me
 MSYS_NO_PATHCONV=1 node -e '
 const fs = require("fs");
 const src = fs.readFileSync(process.argv[1], "utf8");
-const fn = src.match(/function scrapeConfig\([\s\S]*?\n}\n/)[0];
+// A Windows checkout may have CRLF line endings.
+const fn = src.match(/function scrapeConfig\([\s\S]*?\r?\n}\r?\n/)[0];
 const scrapeConfig = new Function(fn + "; return scrapeConfig;")();
 const text = scrapeConfig(process.argv[2]).replace("<API key>", process.argv[3]);
 fs.writeFileSync(process.argv[4], "global:\n  scrape_interval: 5s\n" + text + "\n");

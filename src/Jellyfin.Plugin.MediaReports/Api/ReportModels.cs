@@ -94,6 +94,21 @@ public sealed record ReportContext
     /// <summary>Gets the type: Movie, Episode, Season or Series.</summary>
     public string Type { get; init; } = string.Empty;
 
+    /// <summary>Gets the series name, for an episode or season; null otherwise.</summary>
+    public string? SeriesName { get; init; }
+
+    /// <summary>Gets the season number of an episode, as Jellyfin's ParentIndexNumber; null otherwise.</summary>
+    public int? ParentIndexNumber { get; init; }
+
+    /// <summary>Gets the episode number of an episode or the season number of a season, as Jellyfin's IndexNumber; null otherwise.</summary>
+    public int? IndexNumber { get; init; }
+
+    /// <summary>Gets the year the title came out, or null.</summary>
+    public int? ProductionYear { get; init; }
+
+    /// <summary>Gets the longest note a report takes, in characters.</summary>
+    public int NoteMaxLength { get; init; }
+
     /// <summary>Gets the reasons on offer, in order.</summary>
     public IReadOnlyList<ReasonOption> Reasons { get; init; } = [];
 
@@ -164,8 +179,17 @@ public sealed record MyReports
     /// <summary>Gets the reports, newest first.</summary>
     public IReadOnlyList<MyReportRow> Reports { get; init; } = [];
 
-    /// <summary>Gets how many are unread.</summary>
+    /// <summary>Gets how many are unread, across every page.</summary>
     public int Unread { get; init; }
+
+    /// <summary>Gets the page, from 1.</summary>
+    public int Page { get; init; }
+
+    /// <summary>Gets the most reports a page holds.</summary>
+    public int PageSize { get; init; }
+
+    /// <summary>Gets how many reports the list holds, across every page.</summary>
+    public int Total { get; init; }
 }
 
 /// <summary>
@@ -181,6 +205,18 @@ public sealed record MyReportRow
 
     /// <summary>Gets the title as the reporter sees it.</summary>
     public string Title { get; init; } = string.Empty;
+
+    /// <summary>Gets the series name, for an episode or season; null otherwise.</summary>
+    public string? SeriesName { get; init; }
+
+    /// <summary>Gets the season number of an episode, as Jellyfin's ParentIndexNumber; null otherwise.</summary>
+    public int? ParentIndexNumber { get; init; }
+
+    /// <summary>Gets the episode number of an episode or the season number of a season, as Jellyfin's IndexNumber; null otherwise.</summary>
+    public int? IndexNumber { get; init; }
+
+    /// <summary>Gets the year the title came out, or null.</summary>
+    public int? ProductionYear { get; init; }
 
     /// <summary>Gets the reason code, stable across renames.</summary>
     public string ReasonCode { get; init; } = string.Empty;
@@ -235,6 +271,18 @@ public sealed record MyReportDetail
 
     /// <summary>Gets the title as the reporter sees it.</summary>
     public string Title { get; init; } = string.Empty;
+
+    /// <summary>Gets the series name, for an episode or season; null otherwise.</summary>
+    public string? SeriesName { get; init; }
+
+    /// <summary>Gets the season number of an episode, as Jellyfin's ParentIndexNumber; null otherwise.</summary>
+    public int? ParentIndexNumber { get; init; }
+
+    /// <summary>Gets the episode number of an episode or the season number of a season, as Jellyfin's IndexNumber; null otherwise.</summary>
+    public int? IndexNumber { get; init; }
+
+    /// <summary>Gets the year the title came out, or null.</summary>
+    public int? ProductionYear { get; init; }
 
     /// <summary>Gets the reason code.</summary>
     public string ReasonCode { get; init; } = string.Empty;

@@ -349,6 +349,8 @@ with sync_playwright() as p:
 
     # ---- The menu count and the Reports tab ----------------------------------------
     # A fresh load of the Dashboard, as when the admin opens it.
+    summary_calls = []
+    page.on("request", lambda r: summary_calls.append((r.method, r.url)) if "/MediaReports/Admin/Summary" in r.url else None)
     page.goto(API + "/web/#/dashboard")
     page.reload()
     page.wait_for_function("() => { const b = document.querySelector('.mediaReportsMenuCount'); return b && b.textContent === '7'; }", timeout=WAIT_MS)
@@ -368,6 +370,9 @@ with sync_playwright() as p:
     check(listed[0]["issue"] == str(series_issue), "rows are sorted by last report, newest first")
     page.wait_for_function("() => !document.querySelector('.mediaReportsMenuCount')", timeout=WAIT_MS)
     check(True, "opening the tab clears the menu count")
+    seen_posts = [u for m, u in summary_calls if m == "POST" and u.split("?")[0].endswith("/Admin/Summary/Seen")]
+    check(len(seen_posts) == 1 and not any("markSeen" in u for _, u in summary_calls),
+          "the tab marks the summary seen once, with POST Summary/Seen (%s)" % summary_calls)
 
     # Leaving and coming back with nothing new: no dots.
     page.goto(API + "/web/#/dashboard")

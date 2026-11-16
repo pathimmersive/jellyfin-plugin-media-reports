@@ -92,10 +92,10 @@ public sealed class ReportStore
             connection,
             """
             INSERT INTO report (created_at, reporter_user_id, reporter_name, item_id, item_type, item_name, provider_ids,
-                series_id, series_name, series_provider_ids, season_number, episode_number, file_path, file_size, file_modified,
+                series_id, series_name, series_provider_ids, season_number, episode_number, production_year, file_path, file_size, file_modified,
                 reason_code, note, issue_id, snapshot, play_method, transcode_reasons, client, device)
             VALUES ($now, $user, $name, $item, $type, $itemName, $providers, $series, $seriesName, $seriesProviders, $season, $episode,
-                $path, $size, $modified, $reason, $note, $issue, $snapshot, $method, $reasons, $client, $device)
+                $year, $path, $size, $modified, $reason, $note, $issue, $snapshot, $method, $reasons, $client, $device)
             RETURNING id
             """,
             ("$now", now),
@@ -110,6 +110,7 @@ public sealed class ReportStore
             ("$seriesProviders", JsonSerializer.Serialize(report.SeriesProviderIds)),
             ("$season", report.SeasonNumber),
             ("$episode", report.EpisodeNumber),
+            ("$year", report.ProductionYear),
             ("$path", report.FilePath),
             ("$size", report.FileSize),
             ("$modified", Time(report.FileModified)),
@@ -1187,6 +1188,7 @@ public sealed class ReportStore
         SeriesProviderIds = Map(Text(r, "series_provider_ids")),
         SeasonNumber = (int?)Number(r, "season_number"),
         EpisodeNumber = (int?)Number(r, "episode_number"),
+        ProductionYear = (int?)Number(r, "production_year"),
         FilePath = Text(r, "file_path"),
         FileSize = Number(r, "file_size"),
         FileModified = ParseTime(Text(r, "file_modified")),

@@ -344,9 +344,9 @@
         if (!api) {
             return Promise.reject({ status: 0 });
         }
-        // A DELETE, a Hide and a load signal answer 204 with no body to parse.
+        // A DELETE, a Hide, a Seen and a load signal answer 204 with no body to parse.
         var request = { type: method, url: api.getUrl(path, query || {}) };
-        if (method !== 'DELETE' && !/\/(Hide|Loaded)$/.test(path)) {
+        if (method !== 'DELETE' && !/\/(Hide|Seen|Loaded)$/.test(path)) {
             request.dataType = 'json';
         }
         if (body) {
@@ -948,8 +948,21 @@
         loadMine(state, null);
     }
 
+    // The list comes 50 a page; the dialog shows every report, so read pages until all are in.
+    function allMine() {
+        function from(page, mine) {
+            return call('GET', 'MediaReports/Report/Mine', { page: page }).then(function (next) {
+                var added = next.Reports || [];
+                next.Reports = (mine ? mine.Reports : []).concat(added);
+                // An empty page ends it too, should the list shrink while it is read.
+                return added.length === 0 || next.Reports.length >= (next.Total || 0) ? next : from(page + 1, next);
+            });
+        }
+        return from(1, null);
+    }
+
     function loadMine(state, focusId) {
-        call('GET', 'MediaReports/Report/Mine').then(function (mine) {
+        allMine().then(function (mine) {
             if (open === state) {
                 state.mine = mine;
                 renderMine(state, focusId);

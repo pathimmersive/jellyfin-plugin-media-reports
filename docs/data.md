@@ -17,7 +17,7 @@ Everything stays on your Jellyfin server. Data leaves the server only through th
 
 - `id`, `created_at`, `issue_id` (the issue it was grouped into).
 - `reporter_user_id`, `reporter_name`: who filed it, by Jellyfin user id and the user name at the time.
-- `item_id`, `item_type`, `item_name`, `provider_ids` (TMDb, TVDb, IMDb), `series_id`, `series_name`, `series_provider_ids`, `season_number`, `episode_number`: what was reported.
+- `item_id`, `item_type`, `item_name`, `provider_ids` (TMDb, TVDb, IMDb), `series_id`, `series_name`, `series_provider_ids`, `season_number`, `episode_number`, `production_year`: what was reported.
 - `file_path`, `file_size`, `file_modified`: the file at report time. The path is shown only to admins.
 - `reason_code`, `note`: the reason picked and the user's own note.
 - `snapshot`: the playback details, as JSON: client and version, device name, play method, transcode reasons and output, position, the audio and subtitle streams, and the source file's streams. It holds no IP address, no file path and no user id.

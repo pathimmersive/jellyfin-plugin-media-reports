@@ -1165,13 +1165,13 @@ export default function (view) {
             root.appendChild(header(null));
             root.appendChild(tabs(null, 'suspected'));
             root.appendChild(skeleton());
-            const counts = () => call('GET', 'Summary', { markSeen: false }).then((summary) => {
+            const counts = () => call('GET', 'Summary').then((summary) => {
                 const tab = root.querySelector('.mrSuspectedTab .mrCount');
                 if (tab && mine === generation) {
                     tab.textContent = summary.Suspected || 0;
                 }
             }, () => null);
-            Promise.all([call('GET', 'Findings', params.kind ? { kind: params.kind } : {}), call('GET', 'Summary', { markSeen: false })]).then(([list, summary]) => {
+            Promise.all([call('GET', 'Findings', params.kind ? { kind: params.kind } : {}), call('GET', 'Summary')]).then(([list, summary]) => {
                 if (mine === generation) {
                     root.textContent = '';
                     root.appendChild(header(summary));
@@ -1193,7 +1193,7 @@ export default function (view) {
             root.appendChild(header(null));
             root.appendChild(tabs(null, 'settings'));
             root.appendChild(skeleton());
-            Promise.all([call('GET', 'Settings'), call('GET', 'Summary', { markSeen: false })]).then(([settings, summary]) => {
+            Promise.all([call('GET', 'Settings'), call('GET', 'Summary')]).then(([settings, summary]) => {
                 if (mine === generation) {
                     root.textContent = '';
                     root.appendChild(header(summary));
@@ -1222,7 +1222,7 @@ export default function (view) {
             }
         }
         call('GET', 'Issues', query)
-            .then((list) => call('GET', 'Summary', { markSeen: !visit.marked }).then((summary) => [list, summary]))
+            .then((list) => call('GET', 'Summary').then((summary) => [list, summary]))
             .then(([list, summary]) => {
                 if (mine !== generation) {
                     return;
@@ -1230,7 +1230,11 @@ export default function (view) {
                 if (!visit.marked) {
                     visit.marked = true;
                     list.Rows.flatMap((r) => [r].concat(r.Children || [])).filter((r) => r.IsNew).forEach((r) => seenNew.add(r.IssueId));
-                    document.dispatchEvent(new CustomEvent('mediareports:seen'));
+                    // The counts are shown; from now on nothing here is new to this admin. The menu
+                    // count is told once the server has recorded it, so it reads the cleared count.
+                    ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl(API + 'Summary/Seen') })
+                        .catch(() => {})
+                        .then(() => document.dispatchEvent(new CustomEvent('mediareports:seen')));
                 }
                 const filtered = params.reason || params.client || params.q;
                 root.textContent = '';

@@ -82,20 +82,23 @@ public sealed class AdminServiceTests : IDisposable
     }
 
     [Fact]
-    public void Summary_CountsOpenIssuesAndNewOnes_PerAdmin_AndMarkSeenClearsOnlyTheCallers()
+    public void Summary_CountsOpenIssuesAndNewOnes_PerAdmin_ChangesNothing_AndSeenClearsOnlyTheCallers()
     {
         File(_alice, MovieId, "stutter");
         File(_bob, MovieId, "stutter");
         var episode = File(_alice, Guid.NewGuid(), "audio", type: "Episode");
         _store.SetStatus(episode.IssueId, IssueStatus.Fixed, _admin.Id);
 
-        Assert.Equal(new AdminSummary(1, 2, 1), _service.GetSummary(_admin.Id, markSeen: true));
-        Assert.Equal(new AdminSummary(1, 2, 0), _service.GetSummary(_admin.Id, markSeen: false));
-        Assert.Equal(new AdminSummary(1, 2, 1), _service.GetSummary(_otherAdmin.Id, markSeen: false));
+        Assert.Equal(new AdminSummary(1, 2, 1), _service.GetSummary(_admin.Id));
+        Assert.Equal(new AdminSummary(1, 2, 1), _service.GetSummary(_admin.Id));
+
+        Assert.Equal(Outcome.Ok, _service.MarkSummarySeen(_admin.Id).Outcome);
+        Assert.Equal(new AdminSummary(1, 2, 0), _service.GetSummary(_admin.Id));
+        Assert.Equal(new AdminSummary(1, 2, 1), _service.GetSummary(_otherAdmin.Id));
 
         _clock.Advance(TimeSpan.FromMinutes(5));
         File(_alice, Guid.NewGuid(), "other");
-        Assert.Equal(new AdminSummary(2, 3, 1), _service.GetSummary(_admin.Id, markSeen: false));
+        Assert.Equal(new AdminSummary(2, 3, 1), _service.GetSummary(_admin.Id));
     }
 
     [Fact]
@@ -394,7 +397,7 @@ public sealed class AdminServiceTests : IDisposable
         Assert.True(list.Rows.Select(r => r.LastSeen).SequenceEqual(list.Rows.Select(r => r.LastSeen).OrderByDescending(t => t)));
         Assert.All(Value(_service.ListFindings("freezing")).Rows, r => Assert.Equal("freezing", r.Kind));
         Assert.Equal(Outcome.BadRequest, _service.ListFindings("nonsense").Outcome);
-        Assert.Equal(1, _service.GetSummary(_admin.Id, false).Suspected);
+        Assert.Equal(1, _service.GetSummary(_admin.Id).Suspected);
     }
 
     [Fact]

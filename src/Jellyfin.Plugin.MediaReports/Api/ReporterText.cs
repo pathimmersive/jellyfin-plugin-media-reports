@@ -25,6 +25,23 @@ public static class ReporterText
     };
 
     /// <summary>
+    /// Gets the title's parts with Jellyfin's field names: for an episode the series, season
+    /// (ParentIndexNumber) and episode (IndexNumber); for a season the series and season
+    /// (IndexNumber); the year for any title.
+    /// </summary>
+    /// <param name="itemType">Movie, Episode, Season or Series.</param>
+    /// <param name="seriesName">The series name.</param>
+    /// <param name="seasonNumber">The season number.</param>
+    /// <param name="episodeNumber">The episode number.</param>
+    /// <returns>The series name, ParentIndexNumber and IndexNumber.</returns>
+    public static (string? SeriesName, int? ParentIndexNumber, int? IndexNumber) TitleParts(string itemType, string? seriesName, int? seasonNumber, int? episodeNumber) => itemType switch
+    {
+        "Episode" => (seriesName, seasonNumber, episodeNumber),
+        "Season" => (seriesName, null, seasonNumber),
+        _ => (null, null, null),
+    };
+
+    /// <summary>
     /// Gets the status code a reporter's client sees, from the documented set. The plugin's own
     /// Replaced – verify reads <c>investigating</c>, so the storage status never reaches a reporter.
     /// </summary>

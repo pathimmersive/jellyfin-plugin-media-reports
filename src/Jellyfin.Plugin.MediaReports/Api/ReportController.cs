@@ -82,6 +82,11 @@ public sealed class ReportController : ControllerBase
             return StatusCode(StatusCodes.Status503ServiceUnavailable, new ApiError("storage-unavailable", "Reports can't be stored right now."));
         }
 
+        if (result.Outcome == Outcome.Ok)
+        {
+            Response.Headers.Location = $"{Request.PathBase}/MediaReports/Report/Mine/{result.Value!.Id}";
+        }
+
         return Answer(() => result, StatusCodes.Status201Created);
     }
 
@@ -91,7 +96,8 @@ public sealed class ReportController : ControllerBase
     /// <returns>The reports.</returns>
     [HttpGet("Mine")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public async Task<ActionResult<MyReports>> GetMine()
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<MyReports>> GetMine([FromQuery] int page = 1)
     {
         var (userId, _) = await Caller().ConfigureAwait(false);
         if (userId is null)
@@ -99,7 +105,7 @@ public sealed class ReportController : ControllerBase
             return Forbid();
         }
 
-        return Answer(() => _service.Mine(userId.Value), StatusCodes.Status200OK);
+        return Answer(() => _service.Mine(userId.Value, page), StatusCodes.Status200OK);
     }
 
     /// <summary>

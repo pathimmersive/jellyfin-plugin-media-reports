@@ -84,11 +84,11 @@ public sealed class AdminService
     /// Counts open issues, their reports, and those new since the admin last looked.
     /// </summary>
     /// <param name="adminId">The admin.</param>
-    /// <param name="markSeen">True to record now as the admin's last look, after counting.</param>
+
     /// <returns>The summary.</returns>
-    public AdminSummary GetSummary(Guid adminId, bool markSeen)
+    public AdminSummary GetSummary(Guid adminId)
     {
-        return Summary(adminId, markSeen);
+        return Summary(adminId);
     }
 
     /// <summary>
@@ -159,22 +159,27 @@ public sealed class AdminService
         return line;
     }
 
-    private AdminSummary Summary(Guid adminId, bool markSeen)
+    /// <summary>
+    /// Records now as the admin's last look.
+    /// </summary>
+    /// <param name="adminId">The admin.</param>
+    /// <returns>Success.</returns>
+    public ServiceResult<bool> MarkSummarySeen(Guid adminId)
+    {
+        _store.MarkAdminSeen(adminId);
+        return ServiceResult<bool>.Success(true);
+    }
+
+    private AdminSummary Summary(Guid adminId)
     {
         var seen = _store.GetAdminSeen(adminId);
         var open = _store.GetIssuesWithReports(closed: false);
-        var summary = new AdminSummary(
+        return new AdminSummary(
             open.Count,
             open.Sum(i => i.Reports.Count),
             open.Count(i => IsNew(i.Reports, seen)),
             Notifications.ButtonWatch.Evaluate(_store, _config(), DateTimeOffset.UtcNow).Stopped,
             _store.GetRecentFindingCounts(7).Values.Sum());
-        if (markSeen)
-        {
-            _store.MarkAdminSeen(adminId);
-        }
-
-        return summary;
     }
 
     /// <summary>

@@ -147,6 +147,9 @@ public sealed record NewReport
     /// <summary>Gets the episode number.</summary>
     public int? EpisodeNumber { get; init; }
 
+    /// <summary>Gets the year the title came out, at report time.</summary>
+    public int? ProductionYear { get; init; }
+
     /// <summary>Gets the file path at report time, shown only to admins.</summary>
     public string? FilePath { get; init; }
 
@@ -265,6 +268,9 @@ public sealed record StoredReport
 
     /// <summary>Gets the episode number.</summary>
     public int? EpisodeNumber { get; init; }
+
+    /// <summary>Gets the year the title came out, at report time.</summary>
+    public int? ProductionYear { get; init; }
 
     /// <summary>Gets the file path at report time.</summary>
     public string? FilePath { get; init; }

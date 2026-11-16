@@ -203,11 +203,21 @@ assert d["Type"] == "Movie" and d["Name"], d
 p = d["Playback"]
 assert p and p["DeviceName"] == "Living Room TV" and p["State"] == "Stopped", p
 assert d["OpenReports"] == []
-print("context: 8 reasons, playback on Living Room TV, Stopped")
+assert d.get("ProductionYear") == 2026 and d.get("NoteMaxLength") == 1000, d
+for absent in ("SeriesName", "ParentIndexNumber", "IndexNumber"):
+    assert d.get(absent) is None, (absent, d)
+print("context: 8 reasons, playback on Living Room TV, Stopped, year 2026, notes up to 1000")
 PY
 
 echo "== file reports"
-ok "Alice Phone" "$alice_phone" POST /MediaReports/Report "{\"itemId\":\"$item_id\",\"reasonCode\":\"stutter\",\"note\":\"keeps jumping back\"}" >"$work/results/alice.json"
+code="$(curl -sS -D "$work/results/alice-headers.txt" -o "$work/results/alice.json" -w '%{http_code}' -X POST "$api/MediaReports/Report" \
+  -H "Content-Type: application/json" -H "Authorization: $(auth "Alice Phone" "$alice_phone")" \
+  --data "{\"itemId\":\"$item_id\",\"reasonCode\":\"stutter\",\"note\":\"keeps jumping back\"}")"
+[[ "$code" == 201 ]] || fail "filing answered $code"
+location="$(tr -d '\r' <"$work/results/alice-headers.txt" | sed -n 's/^[Ll]ocation: //p')"
+[[ "$location" == "/MediaReports/Report/Mine/$(json "d['Id']" <"$work/results/alice.json")" ]] || fail "the Location header is '$location'"
+[[ "$(req "Alice Phone" "$alice_phone" GET "$location")" == 200 ]] || fail "the Location does not open the report"
+echo "filing answers 201 with Location $location"
 [[ "$(req "Alice Phone" "$alice_phone" GET "/MediaReports/Report/Context?itemId=$item_id")" == 200 ]] || fail "context after filing"
 cp "$work/results/last.json" "$work/results/context-after.json"
 expect 409 already-reported "Alice Phone" "$alice_phone" POST /MediaReports/Report "{\"itemId\":\"$item_id\",\"reasonCode\":\"stutter\"}"
@@ -360,6 +370,8 @@ PY
 echo "== my reports, and what another user can't do with them"
 issue="$(json "d['IssueId']" <"$work/results/alice.json")"
 ok "Alice Phone" "$alice_phone" GET /MediaReports/Report/Mine >"$work/results/mine-before.json"
+ok "Alice Phone" "$alice_phone" GET "/MediaReports/Report/Mine?page=2" >"$work/results/mine-page-2.json"
+expect 400 bad-query "Alice Phone" "$alice_phone" GET "/MediaReports/Report/Mine?page=0"
 audio_report="$(json "d['Reports'][0]['Id']" <"$work/results/mine-before.json")"
 expect 404 report-not-found "Bob Laptop" "$bob" GET "/MediaReports/Report/Mine/$alice_report"
 expect 404 report-not-found "Bob Laptop" "$bob" DELETE "/MediaReports/Report/Mine/$alice_report"
@@ -394,6 +406,12 @@ title = load("context.json")["Name"]
 before, after, detail, fetched, read, bob = (load(n) for n in ("mine-before.json", "mine-after.json", "mine-detail.json", "mine-fetched.json", "mine-read.json", "bob-mine.json"))
 assert [x["ReasonLabel"] for x in before["Reports"]] == ["Audio problem", "Stutter or jitter"] and before["Unread"] == 0, before
 assert [x["Status"] for x in before["Reports"]] == ["new", "new"], before
+assert (before["Page"], before["PageSize"], before["Total"]) == (1, 50, 2), before
+page2 = load("mine-page-2.json")
+assert (page2["Page"], page2["Total"], page2["Reports"]) == (2, 2, []), page2
+for x in before["Reports"]:
+    assert x.get("ProductionYear") == 2026 and x.get("SeriesName") is None and x.get("IndexNumber") is None, x
+assert detail.get("ProductionYear") == 2026 and detail.get("SeriesName") is None, detail
 assert len(after["Reports"]) == 1 and after["Unread"] == 1 and after["Reports"][0]["Unread"], after
 assert (after["Reports"][0]["Status"], after["Reports"][0]["StatusLabel"]) == ("duplicate", "Duplicate"), after
 assert detail["Status"] == "duplicate", detail

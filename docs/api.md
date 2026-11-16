@@ -96,13 +96,19 @@ filed on; offer a Report button only on those.
 ```json
 {
   "ItemId": "6f1c…", "Name": "Pilot", "Type": "Episode",
+  "SeriesName": "Test Series", "ParentIndexNumber": 2, "IndexNumber": 5, "ProductionYear": 2021,
+  "NoteMaxLength": 1000,
   "Reasons": [ { "Code": "stutter", "Label": "Stutter or jitter" } ],
   "OpenReports": [ { "Id": 12, "ReasonCode": "audio", "ReasonLabel": "Audio problem", "Status": "new" } ],
   "Playback": { "DeviceName": "Living Room TV", "Client": "Jellyfin Roku", "State": "Stopped", "LastSeen": "2026-11-14T19:02:11+00:00" }
 }
 ```
 
-`Reasons` are the active reasons, in the admin's order. `OpenReports` are the caller's own open
+`SeriesName`, `ParentIndexNumber`, `IndexNumber` and `ProductionYear` are the title's parts, with
+Jellyfin's names and meanings, for a client that formats the title itself: for an episode the
+series, season and episode; for a season the series and, in `IndexNumber`, the season; the year for
+any title. A part the title doesn't have is left out. `NoteMaxLength` is the longest note a report
+takes. `Reasons` are the active reasons, in the admin's order. `OpenReports` are the caller's own open
 reports on this title. `Playback` is the playback a report would carry: the caller's live playback
 of the item, preferring this device, or their most recent one. `State` is `Playing`, `Stopped` or
 `Ended`. It is null when there is none, and always null for a season or series.
@@ -118,7 +124,8 @@ Refusals: 400 `item-not-reportable` (a type not in `ReportableTypes`, such as a 
 { "itemId": "6f1c…", "reasonCode": "stutter", "note": "Freezes at the start of every scene." }
 ```
 
-`note` is optional, up to 1,000 characters. Answers 201:
+`note` is optional, up to `NoteMaxLength` (1,000) characters. Answers 201, with a `Location`
+header naming the report, `/MediaReports/Report/Mine/{id}`:
 
 ```json
 { "Id": 31, "IssueId": 9, "ItemId": "6f1c…", "ReasonCode": "stutter", "Status": "new",
@@ -142,26 +149,30 @@ Refusals:
 One user's filings are handled one at a time, so requests sent together still meet the limit and
 the one-open-report-per-reason rule.
 
-### `GET /MediaReports/Report/Mine`
+### `GET /MediaReports/Report/Mine?page=<n>`
 
-*User.* The caller's reports, newest first, and how many are unread. Reports the caller removed
-from their list are left out.
+*User.* The caller's reports, newest first, 50 a page, and how many are unread across every page.
+`page` starts at 1 and is 1 when left out. Reports the caller removed from their list are left out.
 
 ```json
 {
   "Reports": [ {
-    "Id": 31, "ItemId": "6f1c…", "Title": "Test Series S02E05", "ReasonCode": "stutter",
+    "Id": 31, "ItemId": "6f1c…", "Title": "Test Series S02E05",
+    "SeriesName": "Test Series", "ParentIndexNumber": 2, "IndexNumber": 5, "ProductionYear": 2021, "ReasonCode": "stutter",
     "ReasonLabel": "Stutter or jitter", "CreatedAt": "…", "Status": "fixed", "StatusLabel": "Fixed", "Unread": true,
     "ExpiresAt": "2027-11-14T20:00:00+00:00", "ExpiresLabel": "Expires in 12 months",
     "CanHide": true, "CanWithdraw": false
   } ],
-  "Unread": 1
+  "Unread": 1, "Page": 1, "PageSize": 50, "Total": 1
 }
 ```
 
-`Unread` is true when the status changed after the caller last opened the report. `ExpiresAt` is
-when a closed report is deleted under the admin's retention setting. It is null while the report
-is open or when nothing is deleted. Works while reporting is off.
+The title's parts are as in Context. `Total` counts every page; a page past the end has an empty
+`Reports`. `Unread` is true when the status changed after the caller last marked the report seen.
+`ExpiresAt` is when a closed report is deleted under the admin's retention setting. It is null
+while the report is open or when nothing is deleted. Works while reporting is off.
+
+Refusal: 400 `bad-query` for a page below 1.
 
 ### `GET /MediaReports/Report/Mine/{id}`
 
@@ -169,16 +180,17 @@ is open or when nothing is deleted. Works while reporting is off.
 sees it.
 
 ```json
-{ "Id": 31, "ItemId": "6f1c…", "Title": "Test Series S02E05", "ReasonCode": "stutter",
-  "ReasonLabel": "Stutter or jitter", "Note": "Freezes at the start of every scene.",
+{ "Id": 31, "ItemId": "6f1c…", "Title": "Test Series S02E05",
+  "SeriesName": "Test Series", "ParentIndexNumber": 2, "IndexNumber": 5, "ProductionYear": 2021,
+  "ReasonCode": "stutter", "ReasonLabel": "Stutter or jitter", "Note": "Freezes at the start of every scene.",
   "Device": "Living Room TV", "CreatedAt": "…", "Status": "fixed", "StatusLabel": "Fixed",
   "CanWithdraw": false,
   "History": [ { "At": "…", "Label": "Reported" },
                { "At": "…", "Label": "Fixed", "Status": "fixed" } ] }
 ```
 
-`ReasonCode` and each step's `Status` are codes a client can translate; the filing step has no
-`Status`. The labels are English text for people.
+The title's parts are as in Context. `ReasonCode` and each step's `Status` are codes a client can
+translate; the filing step has no `Status`. The labels are English text for people.
 
 Refusal: 404 `report-not-found`, also for another user's report.
 
@@ -281,10 +293,10 @@ copy is current (`ETag`).
 Every route here is *Admin*. With a user's token they answer 403 `forbidden`. The admin sees
 issues, the reports grouped under them, and their history.
 
-### `GET /MediaReports/Admin/Summary?markSeen=<bool>`
+### `GET /MediaReports/Admin/Summary`
 
 Open issues, their reports, and how many issues are new for the calling admin since they last
-looked. With `markSeen=true` it then records now as that admin's last look.
+looked. Reading it changes nothing.
 
 ```json
 { "OpenIssues": 6, "Reports": 7, "New": 6, "ButtonStopped": false, "Suspected": 3 }
@@ -292,6 +304,11 @@ looked. With `markSeen=true` it then records now as that admin's last look.
 
 `ButtonStopped` is true when the Report button stopped loading in an app that used to load it.
 `Suspected` is the 7-day count of suspected problems not dismissed.
+
+### `POST /MediaReports/Admin/Summary/Seen`
+
+Records now as the calling admin's last look, so Summary counts nothing new until another report
+comes in. Call it once the admin has seen the counts. Answers 204.
 
 ### `GET /MediaReports/Admin/Issues`
 

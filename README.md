@@ -13,6 +13,8 @@ Each report carries the playback details the server already knows: the app and d
 
 This is an unofficial, third-party plugin. It is not affiliated with or endorsed by the Jellyfin project.
 
+It is not Jellyfin's Reports plugin ([jellyfin-plugin-reports](https://github.com/jellyfin/jellyfin-plugin-reports)), which makes tables of your library's contents and the server's activity to export. Media Reports is about playback problems your users run into.
+
 ## Features
 
 **For users**

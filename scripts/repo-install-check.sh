@@ -6,7 +6,8 @@
 # image along the way: the manifest names it, the repository serves it, the plugin
 # folder holds it and the server serves it for the installed plugin. Checks the changelog:
 # a version with no CHANGELOG.md entry is not packaged, and the version's entry is the
-# changelog in the manifest, the catalog and the installed plugin's meta.json.
+# changelog in the manifest, the catalog and the installed plugin's meta.json. Checks
+# SHA256SUMS: it matches the zip and the manifest entry, and a changed zip fails it.
 #
 # Usage: scripts/repo-install-check.sh [--corrupt-zip]
 #   --corrupt-zip  change the zip after its checksum is computed; the install must fail
@@ -99,6 +100,17 @@ changelog_is "$out_dir/zip-meta.json" 'd["changelog"]' || fail "the packaged met
   fail "the packaged meta.json does not name pathimmersive as owner"
 echo "the manifest entry and the packaged meta.json carry the $version changelog entry"
 zip_path="$out_dir/media-reports_${version}.zip"
+
+echo "== SHA256SUMS matches the release files"
+[[ "$(wc -l <"$out_dir/SHA256SUMS")" -eq 2 ]] || fail "SHA256SUMS does not list exactly the zip and the manifest entry"
+(cd "$out_dir" && sha256sum -c SHA256SUMS) || fail "SHA256SUMS does not match the release files"
+mkdir -p "$out_dir/tampered"
+cp "$out_dir/SHA256SUMS" "$out_dir/media-reports_${version}.json" "$zip_path" "$out_dir/tampered/"
+printf 'x' >>"$out_dir/tampered/media-reports_${version}.zip"
+if (cd "$out_dir/tampered" && sha256sum -c --quiet SHA256SUMS) >/dev/null 2>&1; then
+  fail "SHA256SUMS still passes for a changed zip"
+fi
+echo "SHA256SUMS lists both files, matches them, and fails for a changed zip"
 # Jellyfin also downloads the image from the manifest, so check the package itself ships it.
 cmp -s "$out_dir/publish/$image_name" "$image_file" || fail "the packaged plugin does not ship $image_name"
 if [[ $corrupt -eq 1 ]]; then

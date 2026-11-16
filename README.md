@@ -85,6 +85,15 @@ Media Reports needs Jellyfin 12.0 or later 12.x (`targetAbi` 12.0.0.0). It is te
 
 Jellyfin checks each download against the checksum in the repository manifest.
 
+To check a release file yourself, download it with `SHA256SUMS` from the GitHub release and run:
+
+```sh
+sha256sum -c --ignore-missing SHA256SUMS
+gh attestation verify media-reports_0.1.0.0.zip --repo pathimmersive/jellyfin-plugin-media-reports
+```
+
+The first says the file is the one the release lists. The second, with the [GitHub CLI](https://cli.github.com/), says it was built by this repository's release workflow from the tagged commit.
+
 ## Settings
 
 Open **Media Reports** in the Dashboard menu, then **Settings**. Changes apply without a restart; apps pick them up on their next page load.

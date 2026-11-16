@@ -7,11 +7,15 @@
 
 # Media Reports for Jellyfin
 
+[![CI](https://github.com/pathimmersive/jellyfin-plugin-media-reports/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/pathimmersive/jellyfin-plugin-media-reports/actions/workflows/ci.yml)
+
 Media Reports is a Jellyfin server plugin for finding out when playback goes wrong for the people who use your server. Users report a problem with a movie, show, season or episode from a Report button in the app. The plugin also watches playback on every app, TV apps included, and lists what looks wrong without anyone pressing a button. You work both from one page in the Dashboard.
 
 Each report carries the playback details the server already knows: the app and device, direct play or transcode and why, the codecs and the position. The user only picks a reason.
 
 This is an unofficial, third-party plugin. It is not affiliated with or endorsed by the Jellyfin project.
+
+It is not Jellyfin's Reports plugin ([jellyfin-plugin-reports](https://github.com/jellyfin/jellyfin-plugin-reports)), which makes tables of your library's contents and the server's activity to export. Media Reports is about playback problems your users run into.
 
 ## Features
 
@@ -174,6 +178,10 @@ bash scripts/repo-install-check.sh   # install it from a local plugin repository
 ```
 
 `scripts/package.sh` builds a release zip and its manifest entry. See [CONTRIBUTING.md](CONTRIBUTING.md) for how changes are made.
+
+## Project status
+
+Maintained by Path Immersive ([@pathimmersive](https://github.com/pathimmersive)), one maintainer working in spare time. Status: early releases. The API is version 1 and stays compatible within it ([docs/api.md](docs/api.md)). An issue or pull request gets a first answer within 14 days, and a security report is acknowledged within 7 days ([SECURITY.md](SECURITY.md)).
 
 ## License
 

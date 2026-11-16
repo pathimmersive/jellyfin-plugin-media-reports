@@ -36,7 +36,7 @@ This Code of Conduct applies within all community spaces, and also applies when 
 
 ## Enforcement
 
-Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the community leaders responsible for enforcement through this project's [private reporting form](https://github.com/pathimmersive/jellyfin-plugin-media-reports/security/advisories/new), which only you and the project maintainers can read; say in the title that it is a conduct report. Content that breaks GitHub's rules can also be reported to GitHub directly. All complaints will be reviewed and investigated promptly and fairly.
+Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the community leaders responsible for enforcement through this project's [private reporting form](https://github.com/pathimmersive/jellyfin-plugin-media-reports/security/advisories/new), which only you and the project maintainers can read. It is GitHub's security advisory form, and it takes conduct reports too: put "Conduct report" at the start of the title. Content that breaks GitHub's rules can also be reported to GitHub directly. All complaints will be reviewed and investigated promptly and fairly.
 
 All community leaders are obligated to respect the privacy and security of the reporter of any incident.
 

@@ -24,6 +24,8 @@ bash scripts/check-repo-docs.sh      # repository documents and third-party noti
 bash scripts/check-reporter-compat.sh # reporter.js works on Chromium 38, the oldest TV browser supported
 ```
 
+After a version tag is released, `bash scripts/check-release.sh v1.2.3` checks the GitHub Release, its checksums and build provenance, and the GitHub Pages manifest, then installs that version from the Pages URL into a Jellyfin container.
+
 The logo's SVG files in `assets/logo` are its source. After changing one, run `dotnet run scripts/render-logo.cs` to remake the PNGs; `scripts/check-repo-docs.sh` fails when a PNG no longer matches its SVG.
 
 The scripts start their own throwaway Jellyfin containers. Test against a local container like these, never against a server other people are using.

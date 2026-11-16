@@ -4,7 +4,7 @@ All notable changes to Media Reports are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow the
 policy in the README's [Versioning](README.md#versioning) section.
 
-## [0.1.0] - Unreleased
+## [0.1.0] - 2026-11-16
 
 First public release, for Jellyfin 12.0 and later 12.x.
 
@@ -28,5 +28,7 @@ First public release, for Jellyfin 12.0 and later 12.x.
 - Retention: closed reports deleted after 365 days by default, a daily copy of the
   database, and a JSON export of everything.
 - A documented HTTP API for other clients ([docs/api.md](docs/api.md)).
+- Each release carries `SHA256SUMS` and a build provenance attestation for the zip and its
+  manifest entry; the README's Install section shows how to check a download.
 
 [0.1.0]: https://github.com/pathimmersive/jellyfin-plugin-media-reports/releases/tag/v0.1.0

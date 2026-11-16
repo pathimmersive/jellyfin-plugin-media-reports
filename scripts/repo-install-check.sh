@@ -10,7 +10,11 @@
 # SHA256SUMS: it matches the zip and the manifest entry, and a changed zip fails it.
 #
 # Usage: scripts/repo-install-check.sh [--corrupt-zip]
-#   --corrupt-zip  change the zip after its checksum is computed; the install must fail
+#        scripts/repo-install-check.sh --repository-url <url> [--version <x.y.z[.w]>]
+#   --corrupt-zip     change the zip after its checksum is computed; the install must fail
+#   --repository-url  skip the packaging and the local repository, and install from a
+#                     published manifest instead (the GitHub Pages URL after a release)
+#   --version         the version to install from that manifest (default: meta.json's)
 #
 # Environment:
 #   JELLYFIN_IMAGE  image to run (default jellyfin/jellyfin:12)
@@ -23,11 +27,24 @@ cd "$repo_root"
 image="${JELLYFIN_IMAGE:-jellyfin/jellyfin:12}"
 timeout="${CHECK_TIMEOUT:-180}"
 corrupt=0
-case "${1:-}" in
-  "") ;;
-  --corrupt-zip) corrupt=1 ;;
-  *) echo "unknown argument: $1" >&2; exit 2 ;;
-esac
+published_url=""
+wanted_version=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --corrupt-zip) corrupt=1; shift ;;
+    --repository-url) published_url="${2:?--repository-url needs a URL}"; shift 2 ;;
+    --version) wanted_version="${2:?--version needs a version}"; shift 2 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+if [[ -n "$wanted_version" && -z "$published_url" ]]; then
+  echo "--version only goes with --repository-url" >&2
+  exit 2
+fi
+if [[ -n "$published_url" && $corrupt -eq 1 ]]; then
+  echo "--corrupt-zip does not go with --repository-url" >&2
+  exit 2
+fi
 
 meta="src/Jellyfin.Plugin.MediaReports/meta.json"
 plugin_name="$(sed -n 's/.*"name": *"\([^"]*\)".*/\1/p' "$meta")"
@@ -42,7 +59,17 @@ repo_container="media-reports-repo-$suffix"
 server_container="media-reports-server-$suffix"
 repo_host="media-reports-repo"
 repo_url="http://$repo_host/manifest.json"
+repo_base="http://$repo_host"
 out_dir="artifacts/repo-check"
+if [[ -n "$published_url" ]]; then
+  repo_url="$published_url"
+  repo_base="${published_url%/*}"
+  version="${wanted_version:-$version}"
+  version="${version#v}"
+  while [[ "$(tr -cd . <<<"$version" | wc -c)" -lt 3 ]]; do
+    version="$version.0"
+  done
+fi
 
 cleanup() {
   docker rm -f "$server_container" "$repo_container" >/dev/null 2>&1 || true
@@ -60,26 +87,8 @@ py() {
   if command -v python3 >/dev/null 2>&1 && python3 -c "" >/dev/null 2>&1; then python3 "$@"; else python "$@"; fi
 }
 
-echo "== a version with no changelog entry is not packaged"
 rm -rf "$out_dir"
 mkdir -p "$out_dir"
-cat >"$out_dir/no-entry.md" <<'EOF'
-# Changelog
-
-## [9.9.9] - 2099-01-01
-
-- Something else.
-EOF
-if CHANGELOG_FILE="$out_dir/no-entry.md" bash scripts/package.sh "$version" "$out_dir/no-entry" "http://$repo_host" 2>"$out_dir/no-entry.log"; then
-  fail "package.sh packaged $version from a changelog with no entry for it"
-fi
-grep -q "has no entry for" "$out_dir/no-entry.log" || { cat "$out_dir/no-entry.log" >&2; fail "package.sh failed for another reason"; }
-[[ ! -e "$out_dir/no-entry" ]] || fail "package.sh wrote files before refusing"
-echo "refused: $(grep -o 'has no entry for.*' "$out_dir/no-entry.log")"
-
-echo "== package $version"
-bash scripts/package.sh "$version" "$out_dir" "http://$repo_host"
-dotnet run scripts/release-tool.cs -- changelog --file CHANGELOG.md --version "$version" >"$out_dir/notes.md"
 # changelog_is <file> <python expression for the changelog>: fails unless it equals the CHANGELOG.md entry.
 changelog_is() {
   py - "$1" "$out_dir/notes.md" "$2" <<'PY'
@@ -90,46 +99,80 @@ got = eval(sys.argv[3])
 sys.exit(0 if got == want else "changelog in %s is %r, not the CHANGELOG.md entry" % (sys.argv[1], got[:80]))
 PY
 }
-changelog_is "$out_dir/media-reports_${version}.json" 'd["changelog"]' || fail "the manifest entry's changelog differs"
-py - "$out_dir/media-reports_${version}.zip" "$out_dir/zip-meta.json" <<'PY'
+
+docker network create "$network" >/dev/null
+if [[ -n "$published_url" ]]; then
+  echo "== the published manifest at $repo_url"
+  curl -sS --fail -L -o "$out_dir/manifest.json" "$repo_url" || fail "$repo_url serves no manifest"
+  dotnet run scripts/release-tool.cs -- changelog --release --file CHANGELOG.md --version "$version" >"$out_dir/notes.md"
+  py - "$out_dir/manifest.json" "$plugin_guid" "$version" <<'PY' || fail "$repo_url does not list $plugin_name $version"
+import json, sys
+d = json.load(open(sys.argv[1], encoding="utf-8"))
+found = [v for p in d if p.get("guid") == sys.argv[2] for v in p.get("versions", []) if v.get("version") == sys.argv[3]]
+sys.exit(0 if found else 1)
+PY
+  curl -sS --fail -L -o "$out_dir/served-repo-$image_name" "$repo_base/$image_name" ||
+    fail "the repository does not serve $image_name"
+  echo "$repo_url lists $plugin_name $version"
+else
+  echo "== a version with no changelog entry is not packaged"
+  cat >"$out_dir/no-entry.md" <<'EOF'
+# Changelog
+
+## [9.9.9] - 2099-01-01
+
+- Something else.
+EOF
+  if CHANGELOG_FILE="$out_dir/no-entry.md" bash scripts/package.sh "$version" "$out_dir/no-entry" "http://$repo_host" 2>"$out_dir/no-entry.log"; then
+    fail "package.sh packaged $version from a changelog with no entry for it"
+  fi
+  grep -q "has no entry for" "$out_dir/no-entry.log" || { cat "$out_dir/no-entry.log" >&2; fail "package.sh failed for another reason"; }
+  [[ ! -e "$out_dir/no-entry" ]] || fail "package.sh wrote files before refusing"
+  echo "refused: $(grep -o 'has no entry for.*' "$out_dir/no-entry.log")"
+
+  echo "== package $version"
+  bash scripts/package.sh "$version" "$out_dir" "http://$repo_host"
+  dotnet run scripts/release-tool.cs -- changelog --file CHANGELOG.md --version "$version" >"$out_dir/notes.md"
+  changelog_is "$out_dir/media-reports_${version}.json" 'd["changelog"]' || fail "the manifest entry's changelog differs"
+  py - "$out_dir/media-reports_${version}.zip" "$out_dir/zip-meta.json" <<'PY'
 import sys, zipfile
 open(sys.argv[2], "wb").write(zipfile.ZipFile(sys.argv[1]).read("meta.json"))
 PY
-changelog_is "$out_dir/zip-meta.json" 'd["changelog"]' || fail "the packaged meta.json's changelog differs"
-[[ "$(py -c 'import json,sys; print(json.load(open(sys.argv[1]))["owner"])' "$out_dir/zip-meta.json")" == pathimmersive ]] ||
-  fail "the packaged meta.json does not name pathimmersive as owner"
-echo "the manifest entry and the packaged meta.json carry the $version changelog entry"
-zip_path="$out_dir/media-reports_${version}.zip"
+  changelog_is "$out_dir/zip-meta.json" 'd["changelog"]' || fail "the packaged meta.json's changelog differs"
+  [[ "$(py -c 'import json,sys; print(json.load(open(sys.argv[1]))["owner"])' "$out_dir/zip-meta.json")" == pathimmersive ]] ||
+    fail "the packaged meta.json does not name pathimmersive as owner"
+  echo "the manifest entry and the packaged meta.json carry the $version changelog entry"
+  zip_path="$out_dir/media-reports_${version}.zip"
 
-echo "== SHA256SUMS matches the release files"
-[[ "$(wc -l <"$out_dir/SHA256SUMS")" -eq 2 ]] || fail "SHA256SUMS does not list exactly the zip and the manifest entry"
-(cd "$out_dir" && sha256sum -c SHA256SUMS) || fail "SHA256SUMS does not match the release files"
-mkdir -p "$out_dir/tampered"
-cp "$out_dir/SHA256SUMS" "$out_dir/media-reports_${version}.json" "$zip_path" "$out_dir/tampered/"
-printf 'x' >>"$out_dir/tampered/media-reports_${version}.zip"
-if (cd "$out_dir/tampered" && sha256sum -c --quiet SHA256SUMS) >/dev/null 2>&1; then
-  fail "SHA256SUMS still passes for a changed zip"
-fi
-echo "SHA256SUMS lists both files, matches them, and fails for a changed zip"
-# Jellyfin also downloads the image from the manifest, so check the package itself ships it.
-cmp -s "$out_dir/publish/$image_name" "$image_file" || fail "the packaged plugin does not ship $image_name"
-if [[ $corrupt -eq 1 ]]; then
-  echo "== corrupt the zip after its checksum was computed"
-  printf 'corrupted' >>"$zip_path"
-fi
-bash scripts/build-manifest.sh "$out_dir/manifest.json" "http://$repo_host" --entries "$out_dir"
-grep -q "\"imageUrl\": \"http://$repo_host/$image_name\"" "$out_dir/manifest.json" ||
-  fail "the manifest does not name the catalog image $image_name"
+  echo "== SHA256SUMS matches the release files"
+  [[ "$(wc -l <"$out_dir/SHA256SUMS")" -eq 2 ]] || fail "SHA256SUMS does not list exactly the zip and the manifest entry"
+  (cd "$out_dir" && sha256sum -c SHA256SUMS) || fail "SHA256SUMS does not match the release files"
+  mkdir -p "$out_dir/tampered"
+  cp "$out_dir/SHA256SUMS" "$out_dir/media-reports_${version}.json" "$zip_path" "$out_dir/tampered/"
+  printf 'x' >>"$out_dir/tampered/media-reports_${version}.zip"
+  if (cd "$out_dir/tampered" && sha256sum -c --quiet SHA256SUMS) >/dev/null 2>&1; then
+    fail "SHA256SUMS still passes for a changed zip"
+  fi
+  echo "SHA256SUMS lists both files, matches them, and fails for a changed zip"
+  # Jellyfin also downloads the image from the manifest, so check the package itself ships it.
+  cmp -s "$out_dir/publish/$image_name" "$image_file" || fail "the packaged plugin does not ship $image_name"
+  if [[ $corrupt -eq 1 ]]; then
+    echo "== corrupt the zip after its checksum was computed"
+    printf 'corrupted' >>"$zip_path"
+  fi
+  bash scripts/build-manifest.sh "$out_dir/manifest.json" "http://$repo_host" --entries "$out_dir"
+  grep -q "\"imageUrl\": \"$repo_base/$image_name\"" "$out_dir/manifest.json" ||
+    fail "the manifest does not name the catalog image $image_name"
 
-echo "== serve the repository"
-docker network create "$network" >/dev/null
-docker create --name "$repo_container" --network "$network" --network-alias "$repo_host" nginx:alpine >/dev/null
-docker cp "$out_dir/manifest.json" "$repo_container:/usr/share/nginx/html/manifest.json"
-docker cp "$zip_path" "$repo_container:/usr/share/nginx/html/"
-docker cp "$out_dir/$image_name" "$repo_container:/usr/share/nginx/html/"
-docker start "$repo_container" >/dev/null
-docker exec "$repo_container" wget -q -O /dev/null "http://localhost/$image_name" ||
-  fail "the repository does not serve $image_name"
+  echo "== serve the repository"
+  docker create --name "$repo_container" --network "$network" --network-alias "$repo_host" nginx:alpine >/dev/null
+  docker cp "$out_dir/manifest.json" "$repo_container:/usr/share/nginx/html/manifest.json"
+  docker cp "$zip_path" "$repo_container:/usr/share/nginx/html/"
+  docker cp "$out_dir/$image_name" "$repo_container:/usr/share/nginx/html/"
+  docker start "$repo_container" >/dev/null
+  docker exec "$repo_container" wget -q -O /dev/null "http://localhost/$image_name" ||
+    fail "the repository does not serve $image_name"
+fi
 
 echo "== start $image"
 docker pull --quiet "$image" >/dev/null
@@ -184,8 +227,11 @@ token="$(call POST /Users/AuthenticateByName '{"Username":"check","Pw":"check-pa
 echo "== add the repository and install $plugin_name $version"
 call POST /Repositories "[{\"Name\":\"Media Reports check\",\"Url\":\"$repo_url\",\"Enabled\":true}]"
 packages="$(call GET /Packages)"
-grep -q "\"name\":\"$plugin_name\"" <<<"$packages" || fail "the server does not list $plugin_name from $repo_url"
-grep -q "\"imageUrl\":\"http://$repo_host/$image_name\"" <<<"$packages" ||
+grep -q "\"name\":\"$plugin_name\"" <<<"$packages" || {
+  docker logs --tail 60 "$server_container" 2>&1 | grep -iE -A3 "repositor|package|manifest" >&2 || true
+  fail "the server does not list $plugin_name from $repo_url"
+}
+grep -q "\"imageUrl\":\"$repo_base/$image_name\"" <<<"$packages" ||
   fail "the catalog does not give the image URL for $plugin_name"
 call GET /Packages >"$out_dir/packages.json"
 changelog_is "$out_dir/packages.json" '[v["changelog"] for p in d if p["name"] == "Media Reports" for v in p["versions"]][0]' ||
@@ -233,4 +279,4 @@ echo "the server serves $image_name for $plugin_name $version"
 docker exec "$server_container" sh -c "cat /config/plugins/*/meta.json" >"$out_dir/installed-meta.json"
 changelog_is "$out_dir/installed-meta.json" 'd["changelog"]' || fail "the installed plugin's meta.json lacks the changelog entry"
 echo "the catalog and the installed plugin carry the $version changelog entry"
-echo "PASS: $image (Jellyfin ${server_version:-unknown}) installed $plugin_name $version from the repository and loaded it"
+echo "PASS: $image (Jellyfin ${server_version:-unknown}) installed $plugin_name $version from $repo_url and loaded it"

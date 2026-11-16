@@ -222,6 +222,23 @@ for kind in freezing low-quality slow-transcode; do
 done
 grep -q '^media_reports_suspected_problems_total{kind="freezing",client="Jellyfin Roku"} 1$' <<<"$metrics" || fail "the Freezing finding is not counted for Jellyfin Roku"
 
+echo "== the Findings list pages and Dismiss answers with no body"
+findings="$(call smoke box "$admin" GET /MediaReports/Admin/Findings)"
+py -c '
+import json, sys
+d = json.loads(sys.argv[1])
+assert (d["Page"], d["PageSize"]) == (1, 50) and d["Total"] == len(d["Rows"]) >= 3, {k: d[k] for k in ("Page", "PageSize", "Total")}
+' "$findings" || fail "the Findings list does not say its page and total"
+first="$(json "d['Rows'][0]['Id']" <<<"$findings")"
+total="$(json "d['Total']" <<<"$findings")"
+empty="$(call smoke box "$admin" GET "/MediaReports/Admin/Findings?page=2" | json "(d['Page'], len(d['Rows']), d['Total'])")"
+[[ "$empty" == "(2, 0, $total)" ]] || fail "page 2 of $total findings is $empty"
+dismissed="$(curl -sS -o "$work/results/dismiss.txt" -w '%{http_code}' -X POST "$api/MediaReports/Admin/Findings/$first/Dismiss" -H "Authorization: $(auth smoke box "$admin")")"
+[[ "$dismissed" == 204 && ! -s "$work/results/dismiss.txt" ]] || fail "Dismiss answered $dismissed with '$(cat "$work/results/dismiss.txt")'"
+after="$(call smoke box "$admin" GET /MediaReports/Admin/Findings | json "d['Total']")"
+(( after == total - 1 )) || fail "dismissing one of $total findings left $after"
+echo "findings: page 1 of 50 holds all $total, page 2 none; Dismiss answered 204 with no body and left $after"
+
 echo "== what was stored"
 docker stop -t 30 "$container" >/dev/null
 db="$work/results/media-reports.db"

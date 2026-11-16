@@ -44,15 +44,27 @@ public sealed class AdminController : ControllerBase
     /// <summary>
     /// Counts open issues, their reports, and those new since the caller last looked.
     /// </summary>
-    /// <param name="markSeen">True to record now as the caller's last look.</param>
     /// <returns>The summary.</returns>
     [HttpGet("Summary")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
-    public async Task<ActionResult<AdminSummary>> GetSummary([FromQuery] bool markSeen = false)
+    public async Task<ActionResult<AdminSummary>> GetSummary()
     {
         var admin = await Caller().ConfigureAwait(false);
-        return Answer(() => ServiceResult<AdminSummary>.Success(_service.GetSummary(admin, markSeen)), StatusCodes.Status200OK);
+        return Answer(() => ServiceResult<AdminSummary>.Success(_service.GetSummary(admin)), StatusCodes.Status200OK);
+    }
+
+    /// <summary>
+    /// Records now as the caller's last look, so Summary counts nothing new until another report.
+    /// </summary>
+    /// <returns>No content.</returns>
+    [HttpPost("Summary/Seen")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult> MarkSummarySeen()
+    {
+        var admin = await Caller().ConfigureAwait(false);
+        return Answer(() => _service.MarkSummarySeen(admin), StatusCodes.Status204NoContent);
     }
 
     /// <summary>
@@ -150,13 +162,14 @@ public sealed class AdminController : ControllerBase
     /// Lists the suspected problems: each kind's 7-day count and the findings not dismissed.
     /// </summary>
     /// <param name="kind">Only this kind.</param>
-    /// <returns>The list.</returns>
+    /// <param name="page">The page, from 1.</param>
+    /// <returns>The page of findings.</returns>
     [HttpGet("Findings")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
-    public ActionResult<FindingList> ListFindings([FromQuery] string? kind = null) =>
-        Answer(() => _service.ListFindings(kind), StatusCodes.Status200OK);
+    public ActionResult<FindingList> ListFindings([FromQuery] string? kind = null, [FromQuery] int page = 1) =>
+        Answer(() => _service.ListFindings(kind, page), StatusCodes.Status200OK);
 
     /// <summary>
     /// Hides a suspected problem from the tab.
@@ -235,7 +248,7 @@ public sealed class AdminController : ControllerBase
         (await _authorization.GetAuthorizationInfo(HttpContext).ConfigureAwait(false)).UserId;
 
     // A refusal names the newer open issue for one issue, or every refused issue for several.
-    private ObjectResult Answer<T>(Func<ServiceResult<T>> call, int successStatus, bool many = false)
+    private ActionResult Answer<T>(Func<ServiceResult<T>> call, int successStatus, bool many = false)
     {
         ServiceResult<T> result;
         try
@@ -249,7 +262,10 @@ public sealed class AdminController : ControllerBase
 
         if (result.Outcome == Outcome.Ok)
         {
-            return StatusCode(successStatus, result.Value);
+            // A 204 or 202 says all there is to say; it carries no body.
+            return successStatus is StatusCodes.Status204NoContent or StatusCodes.Status202Accepted
+                ? StatusCode(successStatus)
+                : StatusCode(successStatus, result.Value);
         }
 
         var error = new IssueError(

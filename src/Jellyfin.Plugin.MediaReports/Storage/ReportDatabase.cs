@@ -17,7 +17,7 @@ public sealed class ReportDatabase
     /// <summary>
     /// The schema version this build writes.
     /// </summary>
-    public const int SchemaVersion = 5;
+    public const int SchemaVersion = 6;
 
     /// <summary>
     /// The schema changes in order; entry <c>n</c> moves a database from version <c>n</c> to <c>n + 1</c>.
@@ -139,6 +139,11 @@ public sealed class ReportDatabase
         );
         CREATE UNIQUE INDEX ux_finding_playback ON finding (playback_key, kind);
         CREATE INDEX ix_finding_last_seen ON finding (last_seen);
+        """,
+
+        // 6: the title's year, so a client can format the title itself.
+        """
+        ALTER TABLE report ADD COLUMN production_year INTEGER;
         """,
     ];
 

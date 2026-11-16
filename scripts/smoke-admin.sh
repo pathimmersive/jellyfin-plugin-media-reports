@@ -202,9 +202,12 @@ echo "== summary and the new count"
 ok "admin box" "$admin" GET /MediaReports/Admin/Summary >"$work/results/summary.json"
 check "$work/results/summary.json" "assert (d['OpenIssues'], d['Reports'], d['New']) == (6, 7, 6), d" "the summary is wrong"
 ok "admin box" "$admin" GET "/MediaReports/Admin/Summary?markSeen=true" >/dev/null
+ok "admin box" "$admin" GET /MediaReports/Admin/Summary >"$work/results/summary-read.json"
+check "$work/results/summary-read.json" "assert d['New'] == 6, d" "reading the summary changed what is new"
+[[ "$(req "admin box" "$admin" POST /MediaReports/Admin/Summary/Seen)" == 204 ]] || fail "Summary/Seen did not answer 204"
 ok "admin box" "$admin" GET /MediaReports/Admin/Summary >"$work/results/summary-seen.json"
-check "$work/results/summary-seen.json" "assert d['New'] == 0, d" "markSeen did not clear the new count"
-echo "summary: 6 open issues from 7 reports, 6 new, 0 after markSeen"
+check "$work/results/summary-seen.json" "assert d['New'] == 0, d" "Summary/Seen did not clear the new count"
+echo "summary: 6 open issues from 7 reports, 6 new after two reads and a markSeen query, 0 after Summary/Seen"
 
 echo "== the issue list"
 ok "admin box" "$admin" GET /MediaReports/Admin/Issues >"$work/results/issues.json"
@@ -251,7 +254,7 @@ ok "admin box" "$admin" PATCH "/MediaReports/Admin/Issues/$movie_issue" '{"statu
 check "$work/results/fixed.json" "
 assert d['Status'] == 'fixed' and d.get('ClosedAt') and d.get('Notes') == 'Re-encoded the file.', d
 kinds = [(e['Kind'], e.get('ActorName')) for e in d['History']]
-assert ('status changed', 'admin') in kinds and ('note added', 'admin') in kinds, kinds
+assert ('status-changed', 'admin') in kinds and ('note-added', 'admin') in kinds, kinds
 " "closing the issue is wrong"
 newer="$(file "Living Room TV" "$alice" "$movie" stutter)"
 [[ "$newer" != "$movie_issue" ]] || fail "a report after Fixed joined the closed issue"
@@ -266,16 +269,18 @@ ok "admin box" "$admin" GET "/MediaReports/Admin/Issues/${episode_issues[0]}" | 
 ok "admin box" "$admin" POST /MediaReports/Admin/Issues/Status "{\"issueIds\":[$ids],\"status\":\"investigating\"}" >/dev/null
 for i in "${episode_issues[@]}"; do
   ok "admin box" "$admin" GET "/MediaReports/Admin/Issues/$i" >"$work/results/episode.json"
-  check "$work/results/episode.json" "assert d['Status'] == 'investigating' and d['History'][-1]['Kind'] == 'status changed', d['History']" "Set status for all missed issue $i"
+  check "$work/results/episode.json" "assert d['Status'] == 'investigating' and d['History'][-1]['Kind'] == 'status-changed', d['History']" "Set status for all missed issue $i"
 done
 echo "all or nothing: refused with one bad id, then all three Investigating with their own history line"
 
 echo "== Refresh and Scan"
 expect 202 "" "admin box" "$admin" POST "/MediaReports/Admin/Issues/$movie_issue/Refresh"
+[[ ! -s "$work/results/last.json" ]] || fail "Refresh answered 202 with a body: $(cat "$work/results/last.json")"
 expect 202 "" "admin box" "$admin" POST "/MediaReports/Admin/Issues/${episode_issues[0]}/Scan"
-ok "admin box" "$admin" GET "/MediaReports/Admin/Issues/${episode_issues[0]}" | json "d['History'][-1]['Kind']" | grep -x "action run" >/dev/null \
-  || fail "Scan wrote no history line"
-echo "Refresh and Scan answered 202 with a history line"
+[[ ! -s "$work/results/last.json" ]] || fail "Scan answered 202 with a body: $(cat "$work/results/last.json")"
+ok "admin box" "$admin" GET "/MediaReports/Admin/Issues/${episode_issues[0]}" | json "d['History'][-1]['Kind']" | grep -x "action-run" >/dev/null \
+  || fail "Scan wrote no history line with the action-run code"
+echo "Refresh and Scan answered 202 with no body and an action-run history line"
 
 echo "== a movie removed from the library"
 rm -rf "$library/movies/Gone Movie (2026)"

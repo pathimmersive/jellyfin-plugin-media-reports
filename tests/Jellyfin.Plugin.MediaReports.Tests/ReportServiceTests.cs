@@ -6,17 +6,21 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Database.Implementations.Entities;
+using Jellyfin.Plugin.MediaReports;
 using Jellyfin.Plugin.MediaReports.Api;
 using Jellyfin.Plugin.MediaReports.Configuration;
 using Jellyfin.Plugin.MediaReports.Playback;
 using Jellyfin.Plugin.MediaReports.Storage;
 using MediaBrowser.Controller.Entities;
+using MediaBrowser.Controller.Net;
 using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Session;
 using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.Session;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -60,9 +64,9 @@ public sealed class ReportServiceTests : IDisposable
         db.Initialize();
         _store = new ReportStore(db, _clock, () => 365);
 
-        var movie = new Movie { Id = MovieId, Name = "Test Movie", Path = _moviePath, ProviderIds = new Dictionary<string, string> { ["Tmdb"] = "693134" } };
+        var movie = new Movie { Id = MovieId, Name = "Test Movie", Path = _moviePath, ProductionYear = 2026, ProviderIds = new Dictionary<string, string> { ["Tmdb"] = "693134" } };
         var series = new Series { Id = SeriesId, Name = "Test Series", Path = _dir, ProviderIds = new Dictionary<string, string> { ["Tvdb"] = "81189" } };
-        var episode = new Episode { Id = EpisodeId, Name = "Pilot", SeriesId = SeriesId, SeriesName = "Test Series", ParentIndexNumber = 2, IndexNumber = 5 };
+        var episode = new Episode { Id = EpisodeId, Name = "Pilot", SeriesId = SeriesId, SeriesName = "Test Series", ParentIndexNumber = 2, IndexNumber = 5, ProductionYear = 2021 };
         foreach (var user in new[] { _alice, _bob })
         {
             _users.Setup(m => m.GetUserById(user.Id)).Returns(user);
@@ -199,6 +203,141 @@ public sealed class ReportServiceTests : IDisposable
         Assert.Equal("81189", stored.SeriesProviderIds["Tvdb"]);
         Assert.Equal(2, stored.SeasonNumber);
         Assert.Equal(5, stored.EpisodeNumber);
+    }
+
+    [Fact]
+    public void Context_Mine_AndDetail_GiveTheTitleInParts_WithJellyfinsNames()
+    {
+        var episode = Ok(_service.GetContext(_alice.Id, null, EpisodeId));
+        Assert.Equal(("Test Series", 2, 5, 2021), (episode.SeriesName, episode.ParentIndexNumber, episode.IndexNumber, episode.ProductionYear));
+        var movie = Ok(_service.GetContext(_alice.Id, null, MovieId));
+        Assert.Equal((null, null, null, 2026), (movie.SeriesName, movie.ParentIndexNumber, movie.IndexNumber, movie.ProductionYear));
+
+        var filed = Ok(_service.File(_alice.Id, null, new FileReportRequest(EpisodeId, "subtitles", null)));
+        Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)));
+
+        var rows = Ok(_service.Mine(_alice.Id)).Reports;
+        var row = rows.Single(r => r.Id == filed.Id);
+        Assert.Equal(("Test Series", 2, 5, 2021), (row.SeriesName, row.ParentIndexNumber, row.IndexNumber, row.ProductionYear));
+        var movieRow = rows.Single(r => r.Id != filed.Id);
+        Assert.Equal((null, null, null, 2026), (movieRow.SeriesName, movieRow.ParentIndexNumber, movieRow.IndexNumber, movieRow.ProductionYear));
+        var detail = Ok(_service.MineDetail(_alice.Id, filed.Id));
+        Assert.Equal(("Test Series", 2, 5, 2021), (detail.SeriesName, detail.ParentIndexNumber, detail.IndexNumber, detail.ProductionYear));
+        Assert.Equal("Test Series S02E05", detail.Title);
+    }
+
+    [Fact]
+    public void Context_GivesTheNoteLimit_ThatFilingEnforces()
+    {
+        var context = Ok(_service.GetContext(_alice.Id, null, MovieId));
+
+        Assert.Equal(1000, context.NoteMaxLength);
+        Assert.Equal(Outcome.Ok, _service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", new string('a', context.NoteMaxLength))).Outcome);
+        AssertRefused(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "audio", new string('a', context.NoteMaxLength + 1))), Outcome.BadRequest, "note-too-long");
+    }
+
+    [Fact]
+    public void Mine_PagesFiftyAtATime_NewestFirst_AndCountsUnreadAcrossEveryPage()
+    {
+        var ids = new List<long>();
+        for (var i = 0; i < 120; i++)
+        {
+            ids.Add(_store.AddReport(new NewReport { ReporterUserId = _alice.Id, ItemId = Guid.NewGuid(), ItemType = "Movie", ItemName = $"Movie {i}", ReasonCode = "stutter" }).ReportId);
+            _clock.Advance(TimeSpan.FromMinutes(1));
+        }
+
+        _store.SetStatus(_store.GetReport(ids[0])!.IssueId, IssueStatus.Fixed, null);
+
+        var first = Ok(_service.Mine(_alice.Id));
+        Assert.Equal((1, 50, 120, 1), (first.Page, first.PageSize, first.Total, first.Unread));
+        Assert.Equal(ids.AsEnumerable().Reverse().Take(50), first.Reports.Select(r => r.Id));
+        var third = Ok(_service.Mine(_alice.Id, 3));
+        Assert.Equal((3, 20, 1), (third.Page, third.Reports.Count, third.Unread));
+        Assert.Equal(ids[0], third.Reports[^1].Id);
+        Assert.Empty(Ok(_service.Mine(_alice.Id, 4)).Reports);
+        AssertRefused(_service.Mine(_alice.Id, 0), Outcome.BadRequest, "bad-query");
+    }
+
+    [Fact]
+    public async Task Filing_AnswersWithTheLocationOfTheNewReport()
+    {
+        var authorization = new Mock<IAuthorizationContext>();
+        authorization.Setup(m => m.GetAuthorizationInfo(It.IsAny<HttpContext>())).ReturnsAsync(new AuthorizationInfo { User = _alice, DeviceId = "phone-id" });
+        var http = new DefaultHttpContext();
+        http.Request.PathBase = "/jellyfin";
+        var controller = new ReportController(_service, authorization.Object) { ControllerContext = new ControllerContext { HttpContext = http } };
+
+        var answer = (await controller.File(new FileReportRequest(MovieId, "stutter", null))).Result as ObjectResult;
+
+        Assert.Equal(StatusCodes.Status201Created, answer!.StatusCode);
+        var filed = Assert.IsType<FiledReportView>(answer.Value);
+        Assert.Equal($"/jellyfin/MediaReports/Report/Mine/{filed.Id}", http.Response.Headers.Location.ToString());
+
+        var refused = (await controller.File(new FileReportRequest(MovieId, "stutter", null))).Result as ObjectResult;
+        Assert.Equal(StatusCodes.Status409Conflict, refused!.StatusCode);
+    }
+
+    [Fact]
+    public void TheHourlyLimit_SaysWhenAFilingIsAcceptedAgain()
+    {
+        for (var i = 0; i < ReportService.MaxReportsPerHour; i++)
+        {
+            var filed = Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)));
+            Assert.Equal(Outcome.Ok, _service.Withdraw(_alice.Id, filed.Id).Outcome);
+            _clock.Advance(TimeSpan.FromMinutes(1));
+        }
+
+        var refused = _service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null));
+        AssertRefused(refused, Outcome.TooManyRequests, "too-many-reports");
+        Assert.Equal(1800, refused.RetryAfterSeconds);
+
+        _clock.Advance(TimeSpan.FromSeconds(1799));
+        Assert.Equal(1, _service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)).RetryAfterSeconds);
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        Assert.Equal(Outcome.Ok, _service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)).Outcome);
+    }
+
+    [Fact]
+    public void AlreadyReported_NamesTheOpenReport_AndNoOtherRefusalNamesOne()
+    {
+        var first = Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null)));
+
+        var again = _service.File(_alice.Id, null, new FileReportRequest(MovieId, "stutter", null));
+        AssertRefused(again, Outcome.Conflict, "already-reported");
+        Assert.Equal(first.Id, again.ReportId);
+        Assert.Equal(Outcome.Ok, _service.MineDetail(_alice.Id, again.ReportId!.Value).Outcome);
+
+        Assert.Null(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "nonsense", null)).ReportId);
+        Assert.Null(_service.File(_bob.Id, null, new FileReportRequest(MovieId, "audio", new string('a', 1001))).ReportId);
+    }
+
+    [Fact]
+    public async Task Refusals_CarryRetryAfter_AndTheOpenReportsId_OverHttp()
+    {
+        var authorization = new Mock<IAuthorizationContext>();
+        authorization.Setup(m => m.GetAuthorizationInfo(It.IsAny<HttpContext>())).ReturnsAsync(new AuthorizationInfo { User = _alice, DeviceId = "phone-id" });
+        ReportController Controller(out DefaultHttpContext http)
+        {
+            http = new DefaultHttpContext();
+            return new ReportController(_service, authorization.Object) { ControllerContext = new ControllerContext { HttpContext = http } };
+        }
+
+        var filed = (await Controller(out _).File(new FileReportRequest(MovieId, "stutter", null))).Result as ObjectResult;
+        var duplicate = (await Controller(out _).File(new FileReportRequest(MovieId, "stutter", null))).Result as ObjectResult;
+        Assert.Equal(StatusCodes.Status409Conflict, duplicate!.StatusCode);
+        Assert.Equal(((FiledReportView)filed!.Value!).Id, Assert.IsType<ApiError>(duplicate.Value).ReportId);
+        Assert.DoesNotContain("ReportId", JsonSerializer.Serialize(new ApiError("note-too-long", "Too long.")), StringComparison.Ordinal);
+
+        // The first filing counts; 29 more, each withdrawn, reach the limit.
+        for (var i = 1; i < ReportService.MaxReportsPerHour; i++)
+        {
+            var other = Ok(_service.File(_alice.Id, null, new FileReportRequest(MovieId, "other", null)));
+            Assert.Equal(Outcome.Ok, _service.Withdraw(_alice.Id, other.Id).Outcome);
+        }
+
+        var tooMany = (await Controller(out var http).File(new FileReportRequest(MovieId, "audio", null))).Result as ObjectResult;
+        Assert.Equal(StatusCodes.Status429TooManyRequests, tooMany!.StatusCode);
+        Assert.Equal("3600", http.Response.Headers.RetryAfter.ToString());
     }
 
     [Fact]

@@ -92,10 +92,10 @@ public sealed class ReportStore
             connection,
             """
             INSERT INTO report (created_at, reporter_user_id, reporter_name, item_id, item_type, item_name, provider_ids,
-                series_id, series_name, series_provider_ids, season_number, episode_number, file_path, file_size, file_modified,
+                series_id, series_name, series_provider_ids, season_number, episode_number, production_year, file_path, file_size, file_modified,
                 reason_code, note, issue_id, snapshot, play_method, transcode_reasons, client, device)
             VALUES ($now, $user, $name, $item, $type, $itemName, $providers, $series, $seriesName, $seriesProviders, $season, $episode,
-                $path, $size, $modified, $reason, $note, $issue, $snapshot, $method, $reasons, $client, $device)
+                $year, $path, $size, $modified, $reason, $note, $issue, $snapshot, $method, $reasons, $client, $device)
             RETURNING id
             """,
             ("$now", now),
@@ -110,6 +110,7 @@ public sealed class ReportStore
             ("$seriesProviders", JsonSerializer.Serialize(report.SeriesProviderIds)),
             ("$season", report.SeasonNumber),
             ("$episode", report.EpisodeNumber),
+            ("$year", report.ProductionYear),
             ("$path", report.FilePath),
             ("$size", report.FileSize),
             ("$modified", Time(report.FileModified)),
@@ -726,13 +727,14 @@ public sealed class ReportStore
     /// </summary>
     /// <param name="kind">Only this kind, or null for all.</param>
     /// <param name="limit">The most to return.</param>
+    /// <param name="offset">How many to skip, newest first.</param>
     /// <returns>The findings.</returns>
-    public IReadOnlyList<StoredFinding> GetFindings(string? kind, int limit)
+    public IReadOnlyList<StoredFinding> GetFindings(string? kind, int limit, int offset = 0)
     {
         using var connection = _db.OpenConnection();
         return Rows(
             connection,
-            "SELECT * FROM finding WHERE dismissed_at IS NULL AND ($kind IS NULL OR kind = $kind) ORDER BY last_seen DESC, id DESC LIMIT $limit",
+            "SELECT * FROM finding WHERE dismissed_at IS NULL AND ($kind IS NULL OR kind = $kind) ORDER BY last_seen DESC, id DESC LIMIT $limit OFFSET $offset",
             r => new StoredFinding
             {
                 Id = r.GetInt64(r.GetOrdinal("id")),
@@ -751,7 +753,22 @@ public sealed class ReportStore
                 Detail = r.GetString(r.GetOrdinal("detail")),
             },
             ("$kind", kind),
-            ("$limit", limit));
+            ("$limit", limit),
+            ("$offset", offset));
+    }
+
+    /// <summary>
+    /// Counts the findings not dismissed, optionally of one kind.
+    /// </summary>
+    /// <param name="kind">Only this kind, or null for all.</param>
+    /// <returns>The count.</returns>
+    public int CountFindings(string? kind)
+    {
+        using var connection = _db.OpenConnection();
+        return (int)Scalar<long>(
+            connection,
+            "SELECT COUNT(*) FROM finding WHERE dismissed_at IS NULL AND ($kind IS NULL OR kind = $kind)",
+            ("$kind", kind));
     }
 
     /// <summary>
@@ -1187,6 +1204,7 @@ public sealed class ReportStore
         SeriesProviderIds = Map(Text(r, "series_provider_ids")),
         SeasonNumber = (int?)Number(r, "season_number"),
         EpisodeNumber = (int?)Number(r, "episode_number"),
+        ProductionYear = (int?)Number(r, "production_year"),
         FilePath = Text(r, "file_path"),
         FileSize = Number(r, "file_size"),
         FileModified = ParseTime(Text(r, "file_modified")),

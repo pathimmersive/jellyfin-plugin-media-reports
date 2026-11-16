@@ -32,6 +32,11 @@ public sealed class ReportService
     public const int MaxReportsPerHour = 30;
 
     /// <summary>
+    /// The most reports one page of the caller's list holds.
+    /// </summary>
+    public const int MinePageSize = 50;
+
+    /// <summary>
     /// The item types a report can be filed on.
     /// </summary>
     public static readonly IReadOnlyList<string> ReportableTypes = ["Movie", "Episode", "Season", "Series"];
@@ -98,11 +103,18 @@ public sealed class ReportService
 
         var reasons = config.GetReasons();
         var playback = PickPlayback(userId, deviceId, item);
+        var type = TypeName(item);
+        var parts = ReporterText.TitleParts(type, (item as IHasSeries)?.SeriesName, SeasonNumber(item), (item as Episode)?.IndexNumber);
         return ServiceResult<ReportContext>.Success(new ReportContext
         {
             ItemId = item.Id,
             Name = item.Name,
-            Type = TypeName(item),
+            Type = type,
+            SeriesName = parts.SeriesName,
+            ParentIndexNumber = parts.ParentIndexNumber,
+            IndexNumber = parts.IndexNumber,
+            ProductionYear = item.ProductionYear,
+            NoteMaxLength = MaxNoteLength,
             Reasons = reasons.Where(r => !r.Retired).Select(r => new ReasonOption(r.Code, r.Label)).ToList(),
             OpenReports = _store.GetOpenReports(userId, item.Id)
                 .Select(r => new OpenReport(r.ReportId, r.ReasonCode, Label(reasons, r.ReasonCode), ReporterText.StatusCode(r.Status)))
@@ -124,7 +136,7 @@ public sealed class ReportService
         // A user already at the limit is refused at once, so a flood never queues at the gate.
         if (RecentFilings(userId) >= MaxReportsPerHour)
         {
-            return TooManyReports();
+            return TooManyReports(userId);
         }
 
         var gate = FilingGate(userId);
@@ -166,7 +178,7 @@ public sealed class ReportService
 
         if (RecentFilings(userId) >= MaxReportsPerHour)
         {
-            return TooManyReports();
+            return TooManyReports(userId);
         }
 
         var item = FindItem(userId, request.ItemId);
@@ -193,7 +205,9 @@ public sealed class ReportService
 
         if (_store.GetOpenReports(userId, item.Id).Any(r => string.Equals(r.ReasonCode, request.ReasonCode, StringComparison.Ordinal)))
         {
-            return ServiceResult<FiledReportView>.Refuse(Outcome.Conflict, "already-reported", "You already have an open report on this title for that reason.");
+            var open = _store.GetOpenReports(userId, item.Id).First(r => string.Equals(r.ReasonCode, request.ReasonCode, StringComparison.Ordinal));
+            return ServiceResult<FiledReportView>.Refuse(Outcome.Conflict, "already-reported", "You already have an open report on this title for that reason.")
+                with { ReportId = open.ReportId };
         }
 
         var playback = PickPlayback(userId, deviceId, item);
@@ -218,13 +232,9 @@ public sealed class ReportService
             SeriesId = series?.Id,
             SeriesName = series?.Name ?? (item as IHasSeries)?.SeriesName,
             SeriesProviderIds = new Dictionary<string, string>(series?.ProviderIds ?? []),
-            SeasonNumber = item switch
-            {
-                Episode e => e.ParentIndexNumber,
-                Season s => s.IndexNumber,
-                _ => null,
-            },
+            SeasonNumber = SeasonNumber(item),
             EpisodeNumber = (item as Episode)?.IndexNumber,
+            ProductionYear = item.ProductionYear,
             FilePath = item.Path,
             FileSize = file?.Length,
             FileModified = file is null ? null : new DateTimeOffset(file.LastWriteTimeUtc, TimeSpan.Zero),
@@ -254,20 +264,32 @@ public sealed class ReportService
     /// reporting is off.
     /// </summary>
     /// <param name="userId">The caller.</param>
-    /// <returns>The reports.</returns>
-    public ServiceResult<MyReports> Mine(Guid userId)
+    /// <param name="page">The page, from 1.</param>
+    /// <returns>The page of reports, or a refusal of a page below 1.</returns>
+    public ServiceResult<MyReports> Mine(Guid userId, int page = 1)
     {
+        if (page < 1)
+        {
+            return ServiceResult<MyReports>.Refuse(Outcome.BadRequest, "bad-query", "The page starts at 1.");
+        }
+
         var config = _config();
         var reasons = config.GetReasons();
         var now = _time.GetUtcNow();
-        var rows = _store.GetReporterReports(userId).Where(r => !r.Hidden).Select(r =>
+        var all = _store.GetReporterReports(userId).Where(r => !r.Hidden).ToList();
+        var rows = all.Skip((page - 1) * MinePageSize).Take(MinePageSize).Select(r =>
         {
             DateTimeOffset? expires = r.ClosedAt is { } closed && config.ReportRetentionDays > 0 ? closed.AddDays(config.ReportRetentionDays) : null;
+            var parts = Parts(r.Report);
             return new MyReportRow
             {
                 Id = r.Report.Id,
                 ItemId = r.Report.ItemId,
                 Title = ReporterText.Title(r.Report),
+                SeriesName = parts.SeriesName,
+                ParentIndexNumber = parts.ParentIndexNumber,
+                IndexNumber = parts.IndexNumber,
+                ProductionYear = r.Report.ProductionYear,
                 ReasonCode = r.Report.ReasonCode,
                 ReasonLabel = Label(reasons, r.Report.ReasonCode),
                 CreatedAt = r.Report.CreatedAt,
@@ -280,7 +302,14 @@ public sealed class ReportService
                 CanWithdraw = r.Status == IssueStatus.New,
             };
         }).ToList();
-        return ServiceResult<MyReports>.Success(new MyReports { Reports = rows, Unread = rows.Count(r => r.Unread) });
+        return ServiceResult<MyReports>.Success(new MyReports
+        {
+            Reports = rows,
+            Unread = all.Count(r => r.Unread),
+            Page = page,
+            PageSize = MinePageSize,
+            Total = all.Count,
+        });
     }
 
     /// <summary>
@@ -341,11 +370,16 @@ public sealed class ReportService
             .Select(e => (e.At, Status: ReporterText.StatusChangedTo(e.Detail)))
             .Where(e => e.Status is not null)
             .Select(e => new MyReportStep(e.At, ReporterText.StatusLabel(e.Status!.Value), ReporterText.StatusCode(e.Status!.Value)));
+        var parts = Parts(report);
         return ServiceResult<MyReportDetail>.Success(new MyReportDetail
         {
             Id = report.Id,
             ItemId = report.ItemId,
             Title = ReporterText.Title(report),
+            SeriesName = parts.SeriesName,
+            ParentIndexNumber = parts.ParentIndexNumber,
+            IndexNumber = parts.IndexNumber,
+            ProductionYear = report.ProductionYear,
             ReasonCode = report.ReasonCode,
             ReasonLabel = Label(_config().GetReasons(), report.ReasonCode),
             Note = report.Note,
@@ -390,6 +424,16 @@ public sealed class ReportService
         return _library.GetItemById<BaseItem>(itemId, user);
     }
 
+    private static int? SeasonNumber(BaseItem item) => item switch
+    {
+        Episode e => e.ParentIndexNumber,
+        Season s => s.IndexNumber,
+        _ => null,
+    };
+
+    private static (string? SeriesName, int? ParentIndexNumber, int? IndexNumber) Parts(StoredReport report) =>
+        ReporterText.TitleParts(report.ItemType, report.SeriesName, report.SeasonNumber, report.EpisodeNumber);
+
     private static bool IsReportable(BaseItem item) => item is Movie or Episode or Season or Series;
 
     // A movie or episode carries the caller's live playback of it, preferring the calling
@@ -428,8 +472,24 @@ public sealed class ReportService
     private static ServiceResult<T> NotFound<T>() =>
         ServiceResult<T>.Refuse(Outcome.NotFound, "item-not-found", "That title isn't in your library.");
 
-    private static ServiceResult<FiledReportView> TooManyReports() =>
-        ServiceResult<FiledReportView>.Refuse(Outcome.TooManyRequests, "too-many-reports", $"You've sent {MaxReportsPerHour} reports in the past hour. Try again later.");
+    private ServiceResult<FiledReportView> TooManyReports(Guid userId) =>
+        ServiceResult<FiledReportView>.Refuse(Outcome.TooManyRequests, "too-many-reports", $"You've sent {MaxReportsPerHour} reports in the past hour. Try again later.")
+            with { RetryAfterSeconds = SecondsUntilAFilingLeavesTheHour(userId) };
+
+    // When the oldest filing in the past hour leaves the window, a filing is accepted again.
+    private int SecondsUntilAFilingLeavesTheHour(Guid userId)
+    {
+        lock (_recentFilings)
+        {
+            if (!_recentFilings.TryGetValue(userId, out var times) || times.Count == 0)
+            {
+                return 1;
+            }
+
+            var wait = times.Peek() + TimeSpan.FromHours(1) - _time.GetUtcNow();
+            return Math.Max(1, (int)Math.Ceiling(wait.TotalSeconds));
+        }
+    }
 
     private static ServiceResult<T> NotReportable<T>() =>
         ServiceResult<T>.Refuse(Outcome.BadRequest, "item-not-reportable", "Reports can be filed on movies, episodes, seasons and series only.");

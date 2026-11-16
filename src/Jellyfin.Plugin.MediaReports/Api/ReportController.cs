@@ -82,6 +82,11 @@ public sealed class ReportController : ControllerBase
             return StatusCode(StatusCodes.Status503ServiceUnavailable, new ApiError("storage-unavailable", "Reports can't be stored right now."));
         }
 
+        if (result.Outcome == Outcome.Ok)
+        {
+            Response.Headers.Location = $"{Request.PathBase}/MediaReports/Report/Mine/{result.Value!.Id}";
+        }
+
         return Answer(() => result, StatusCodes.Status201Created);
     }
 
@@ -91,7 +96,8 @@ public sealed class ReportController : ControllerBase
     /// <returns>The reports.</returns>
     [HttpGet("Mine")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public async Task<ActionResult<MyReports>> GetMine()
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<MyReports>> GetMine([FromQuery] int page = 1)
     {
         var (userId, _) = await Caller().ConfigureAwait(false);
         if (userId is null)
@@ -99,7 +105,7 @@ public sealed class ReportController : ControllerBase
             return Forbid();
         }
 
-        return Answer(() => _service.Mine(userId.Value), StatusCodes.Status200OK);
+        return Answer(() => _service.Mine(userId.Value, page), StatusCodes.Status200OK);
     }
 
     /// <summary>
@@ -207,6 +213,16 @@ public sealed class ReportController : ControllerBase
         return info.UserId.Equals(default) ? (null, null) : (info.UserId, info.DeviceId);
     }
 
+    private ObjectResult TooMany<T>(ServiceResult<T> result)
+    {
+        if (result.RetryAfterSeconds is { } seconds)
+        {
+            Response.Headers.RetryAfter = seconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        return StatusCode(StatusCodes.Status429TooManyRequests, new ApiError(result.Code!, result.Message!));
+    }
+
     private ObjectResult Answer<T>(Func<ServiceResult<T>> call, int successStatus)
     {
         ServiceResult<T> result;
@@ -225,8 +241,8 @@ public sealed class ReportController : ControllerBase
             Outcome.BadRequest => StatusCode(StatusCodes.Status400BadRequest, new ApiError(result.Code!, result.Message!)),
             Outcome.Forbidden => StatusCode(StatusCodes.Status403Forbidden, new ApiError(result.Code!, result.Message!)),
             Outcome.NotFound => StatusCode(StatusCodes.Status404NotFound, new ApiError(result.Code!, result.Message!)),
-            Outcome.TooManyRequests => StatusCode(StatusCodes.Status429TooManyRequests, new ApiError(result.Code!, result.Message!)),
-            _ => StatusCode(StatusCodes.Status409Conflict, new ApiError(result.Code!, result.Message!)),
+            Outcome.TooManyRequests => TooMany(result),
+            _ => StatusCode(StatusCodes.Status409Conflict, new ApiError(result.Code!, result.Message!, result.ReportId)),
         };
     }
 }

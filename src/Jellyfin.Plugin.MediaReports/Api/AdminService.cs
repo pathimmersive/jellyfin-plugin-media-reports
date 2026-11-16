@@ -33,6 +33,19 @@ public sealed class AdminService
     /// </summary>
     public const int MaxNotesLength = 10000;
 
+    /// <summary>
+    /// The most findings one page holds.
+    /// </summary>
+    public const int FindingsPageSize = 50;
+
+    /// <summary>
+    /// Gets the code an admin client sees for a stored history event, such as
+    /// <c>status-changed</c> for <c>status changed</c>. The stored values stay as they are.
+    /// </summary>
+    /// <param name="kind">The stored kind.</param>
+    /// <returns>The kebab-case code.</returns>
+    public static string EventCode(string kind) => kind.Replace(' ', '-');
+
     // Three or more episode issues of one season with one reason are shown as a season row.
     private const int RollupThreshold = 3;
 
@@ -84,29 +97,35 @@ public sealed class AdminService
     /// Counts open issues, their reports, and those new since the admin last looked.
     /// </summary>
     /// <param name="adminId">The admin.</param>
-    /// <param name="markSeen">True to record now as the admin's last look, after counting.</param>
+
     /// <returns>The summary.</returns>
-    public AdminSummary GetSummary(Guid adminId, bool markSeen)
+    public AdminSummary GetSummary(Guid adminId)
     {
-        return Summary(adminId, markSeen);
+        return Summary(adminId);
     }
 
     /// <summary>
     /// Lists the suspected problems for the tab: each kind with its 7-day count, and the kept
-    /// findings not dismissed, newest first, noting other devices with findings on the same title.
+    /// findings not dismissed, newest first, 50 a page, noting other devices with findings on the same title.
     /// </summary>
     /// <param name="kind">Only this kind, or null for all.</param>
-    /// <returns>The list, or a refusal for an unknown kind.</returns>
-    public ServiceResult<FindingList> ListFindings(string? kind)
+    /// <param name="page">The page, from 1.</param>
+    /// <returns>The page, or a refusal for an unknown kind or a page below 1.</returns>
+    public ServiceResult<FindingList> ListFindings(string? kind, int page = 1)
     {
         if (kind is not null && !FindingLabels.ContainsKey(kind))
         {
             return ServiceResult<FindingList>.Refuse(Outcome.BadRequest, "unknown-kind", "There is no such kind of suspected problem.");
         }
 
+        if (page < 1)
+        {
+            return ServiceResult<FindingList>.Refuse(Outcome.BadRequest, "bad-query", "The page starts at 1.");
+        }
+
         var counts = _store.GetRecentFindingCounts(7);
         var devices = _store.GetRecentFindingDevices(7);
-        var rows = _store.GetFindings(kind, 200).Select(f => new FindingRow
+        var rows = _store.GetFindings(kind, FindingsPageSize, (page - 1) * FindingsPageSize).Select(f => new FindingRow
         {
             Id = f.Id,
             Kind = f.Kind,
@@ -126,6 +145,9 @@ public sealed class AdminService
         {
             Kinds = FindingLabels.Select(k => new FindingKind(k.Key, k.Value, counts.GetValueOrDefault(k.Key))).ToList(),
             Rows = rows,
+            Page = page,
+            PageSize = FindingsPageSize,
+            Total = _store.CountFindings(kind),
         });
     }
 
@@ -159,22 +181,27 @@ public sealed class AdminService
         return line;
     }
 
-    private AdminSummary Summary(Guid adminId, bool markSeen)
+    /// <summary>
+    /// Records now as the admin's last look.
+    /// </summary>
+    /// <param name="adminId">The admin.</param>
+    /// <returns>Success.</returns>
+    public ServiceResult<bool> MarkSummarySeen(Guid adminId)
+    {
+        _store.MarkAdminSeen(adminId);
+        return ServiceResult<bool>.Success(true);
+    }
+
+    private AdminSummary Summary(Guid adminId)
     {
         var seen = _store.GetAdminSeen(adminId);
         var open = _store.GetIssuesWithReports(closed: false);
-        var summary = new AdminSummary(
+        return new AdminSummary(
             open.Count,
             open.Sum(i => i.Reports.Count),
             open.Count(i => IsNew(i.Reports, seen)),
             Notifications.ButtonWatch.Evaluate(_store, _config(), DateTimeOffset.UtcNow).Stopped,
             _store.GetRecentFindingCounts(7).Values.Sum());
-        if (markSeen)
-        {
-            _store.MarkAdminSeen(adminId);
-        }
-
-        return summary;
     }
 
     /// <summary>
@@ -288,7 +315,7 @@ public sealed class AdminService
                 Note = r.Note,
                 Snapshot = Snapshot(r),
             }).ToList(),
-            History = events.Select(e => new IssueEvent(e.At, e.Kind, e.Detail, NameOf(e.ActorUserId))).ToList(),
+            History = events.Select(e => new IssueEvent(e.At, EventCode(e.Kind), e.Detail, NameOf(e.ActorUserId))).ToList(),
             File = File(issue.ItemId, newest),
             ServerId = _serverId(),
         });

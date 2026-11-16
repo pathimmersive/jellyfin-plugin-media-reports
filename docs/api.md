@@ -96,13 +96,19 @@ filed on; offer a Report button only on those.
 ```json
 {
   "ItemId": "6f1c…", "Name": "Pilot", "Type": "Episode",
+  "SeriesName": "Test Series", "ParentIndexNumber": 2, "IndexNumber": 5, "ProductionYear": 2021,
+  "NoteMaxLength": 1000,
   "Reasons": [ { "Code": "stutter", "Label": "Stutter or jitter" } ],
   "OpenReports": [ { "Id": 12, "ReasonCode": "audio", "ReasonLabel": "Audio problem", "Status": "new" } ],
   "Playback": { "DeviceName": "Living Room TV", "Client": "Jellyfin Roku", "State": "Stopped", "LastSeen": "2026-11-14T19:02:11+00:00" }
 }
 ```
 
-`Reasons` are the active reasons, in the admin's order. `OpenReports` are the caller's own open
+`SeriesName`, `ParentIndexNumber`, `IndexNumber` and `ProductionYear` are the title's parts, with
+Jellyfin's names and meanings, for a client that formats the title itself: for an episode the
+series, season and episode; for a season the series and, in `IndexNumber`, the season; the year for
+any title. A part the title doesn't have is left out. `NoteMaxLength` is the longest note a report
+takes. `Reasons` are the active reasons, in the admin's order. `OpenReports` are the caller's own open
 reports on this title. `Playback` is the playback a report would carry: the caller's live playback
 of the item, preferring this device, or their most recent one. `State` is `Playing`, `Stopped` or
 `Ended`. It is null when there is none, and always null for a season or series.
@@ -118,7 +124,8 @@ Refusals: 400 `item-not-reportable` (a type not in `ReportableTypes`, such as a 
 { "itemId": "6f1c…", "reasonCode": "stutter", "note": "Freezes at the start of every scene." }
 ```
 
-`note` is optional, up to 1,000 characters. Answers 201:
+`note` is optional, up to `NoteMaxLength` (1,000) characters. Answers 201, with a `Location`
+header naming the report, `/MediaReports/Report/Mine/{id}`:
 
 ```json
 { "Id": 31, "IssueId": 9, "ItemId": "6f1c…", "ReasonCode": "stutter", "Status": "new",
@@ -136,32 +143,36 @@ Refusals:
 | 400 | `item-not-reportable` | The item's type isn't in `ReportableTypes`, such as a song or a recording. |
 | 403 | `reporting-off` | The admin turned reporting off. |
 | 404 | `item-not-found` | The item is unknown, or the caller can't see it. |
-| 409 | `already-reported` | The caller already has an open report for this reason on this title. |
-| 429 | `too-many-reports` | The caller filed 30 reports in the past hour, withdrawn ones included. |
+| 409 | `already-reported` | The caller already has an open report for this reason on this title. `ReportId` names it, so a client can open it instead. |
+| 429 | `too-many-reports` | The caller filed 30 reports in the past hour, withdrawn ones included. The `Retry-After` header gives the seconds until a filing is accepted again. |
 
 One user's filings are handled one at a time, so requests sent together still meet the limit and
 the one-open-report-per-reason rule.
 
-### `GET /MediaReports/Report/Mine`
+### `GET /MediaReports/Report/Mine?page=<n>`
 
-*User.* The caller's reports, newest first, and how many are unread. Reports the caller removed
-from their list are left out.
+*User.* The caller's reports, newest first, 50 a page, and how many are unread across every page.
+`page` starts at 1 and is 1 when left out. Reports the caller removed from their list are left out.
 
 ```json
 {
   "Reports": [ {
-    "Id": 31, "ItemId": "6f1c…", "Title": "Test Series S02E05", "ReasonCode": "stutter",
+    "Id": 31, "ItemId": "6f1c…", "Title": "Test Series S02E05",
+    "SeriesName": "Test Series", "ParentIndexNumber": 2, "IndexNumber": 5, "ProductionYear": 2021, "ReasonCode": "stutter",
     "ReasonLabel": "Stutter or jitter", "CreatedAt": "…", "Status": "fixed", "StatusLabel": "Fixed", "Unread": true,
     "ExpiresAt": "2027-11-14T20:00:00+00:00", "ExpiresLabel": "Expires in 12 months",
     "CanHide": true, "CanWithdraw": false
   } ],
-  "Unread": 1
+  "Unread": 1, "Page": 1, "PageSize": 50, "Total": 1
 }
 ```
 
-`Unread` is true when the status changed after the caller last opened the report. `ExpiresAt` is
-when a closed report is deleted under the admin's retention setting. It is null while the report
-is open or when nothing is deleted. Works while reporting is off.
+The title's parts are as in Context. `Total` counts every page; a page past the end has an empty
+`Reports`. `Unread` is true when the status changed after the caller last marked the report seen.
+`ExpiresAt` is when a closed report is deleted under the admin's retention setting. It is null
+while the report is open or when nothing is deleted. Works while reporting is off.
+
+Refusal: 400 `bad-query` for a page below 1.
 
 ### `GET /MediaReports/Report/Mine/{id}`
 
@@ -169,16 +180,17 @@ is open or when nothing is deleted. Works while reporting is off.
 sees it.
 
 ```json
-{ "Id": 31, "ItemId": "6f1c…", "Title": "Test Series S02E05", "ReasonCode": "stutter",
-  "ReasonLabel": "Stutter or jitter", "Note": "Freezes at the start of every scene.",
+{ "Id": 31, "ItemId": "6f1c…", "Title": "Test Series S02E05",
+  "SeriesName": "Test Series", "ParentIndexNumber": 2, "IndexNumber": 5, "ProductionYear": 2021,
+  "ReasonCode": "stutter", "ReasonLabel": "Stutter or jitter", "Note": "Freezes at the start of every scene.",
   "Device": "Living Room TV", "CreatedAt": "…", "Status": "fixed", "StatusLabel": "Fixed",
   "CanWithdraw": false,
   "History": [ { "At": "…", "Label": "Reported" },
                { "At": "…", "Label": "Fixed", "Status": "fixed" } ] }
 ```
 
-`ReasonCode` and each step's `Status` are codes a client can translate; the filing step has no
-`Status`. The labels are English text for people.
+The title's parts are as in Context. `ReasonCode` and each step's `Status` are codes a client can
+translate; the filing step has no `Status`. The labels are English text for people.
 
 Refusal: 404 `report-not-found`, also for another user's report.
 
@@ -265,7 +277,8 @@ Fields of `SourceStreams`:
 
 ### `POST /MediaReports/Client/Loaded`
 
-*User.* Records that the Report button loaded in the caller's app. The app is the `Client` and
+*User.* Only the Report button script in Jellyfin's web client calls it; a native client doesn't
+need to. Records that the Report button loaded in the caller's app. The app is the `Client` and
 `Version` in the caller's `Authorization` header. Any body is ignored. At most one load per app
 is kept per minute. Answers 204.
 
@@ -281,10 +294,10 @@ copy is current (`ETag`).
 Every route here is *Admin*. With a user's token they answer 403 `forbidden`. The admin sees
 issues, the reports grouped under them, and their history.
 
-### `GET /MediaReports/Admin/Summary?markSeen=<bool>`
+### `GET /MediaReports/Admin/Summary`
 
 Open issues, their reports, and how many issues are new for the calling admin since they last
-looked. With `markSeen=true` it then records now as that admin's last look.
+looked. Reading it changes nothing.
 
 ```json
 { "OpenIssues": 6, "Reports": 7, "New": 6, "ButtonStopped": false, "Suspected": 3 }
@@ -292,6 +305,11 @@ looked. With `markSeen=true` it then records now as that admin's last look.
 
 `ButtonStopped` is true when the Report button stopped loading in an app that used to load it.
 `Suspected` is the 7-day count of suspected problems not dismissed.
+
+### `POST /MediaReports/Admin/Summary/Seen`
+
+Records now as the calling admin's last look, so Summary counts nothing new until another report
+comes in. Call it once the admin has seen the counts. Answers 204.
 
 ### `GET /MediaReports/Admin/Issues`
 
@@ -331,6 +349,10 @@ first (`At`, `Kind`, `Detail`, `ActorName`); `ServerId`; and `File`, read from J
 or series its folder and `EpisodeCount`. When the item is gone, `InLibrary` is false and `Path`
 is the one stored with the newest report.
 
+A history `Kind` is one of these codes: `filed`, `withdrawn`, `status-changed`, `note-added`,
+`action-run` (a Refresh or Scan), `relinked` (moved to a replaced file), `anonymised` (the
+reporter was deleted from the server) and `purged`. `Detail` is English text for people.
+
 Refusal: 404 `issue-not-found`.
 
 ### `PATCH /MediaReports/Admin/Issues/{id}`
@@ -367,7 +389,7 @@ refused issue, and nothing changes.
 ### `POST /MediaReports/Admin/Issues/{id}/Refresh`
 
 Queues Jellyfin's metadata refresh of the issue's title, filling missing metadata and images.
-Answers 202 at once.
+Answers 202 at once, with no body.
 
 Refusals: 404 `issue-not-found`; 404 `not-in-library` (the title is gone).
 
@@ -375,29 +397,30 @@ Refusals: 404 `issue-not-found`; 404 `not-in-library` (the title is gone).
 
 Queues Jellyfin's scan for new and changed files in the folder that holds the title: an
 episode's season folder, or a season's or series' own folder. For a movie it refreshes the movie,
-which rereads its file. Never the whole library. Answers 202 at once.
+which rereads its file. Never the whole library. Answers 202 at once, with no body.
 
 Refusals: 404 `issue-not-found`; 404 `not-in-library`.
 
-### `GET /MediaReports/Admin/Findings?kind=<kind>`
+### `GET /MediaReports/Admin/Findings?kind=<kind>&page=<n>`
 
 Suspected problems the plugin noticed during playback, without anyone reporting them. `Kinds`
 gives each kind's count over the past 7 days. `Rows` lists findings not dismissed, newest first,
-at most 200.
+50 a page; `page` starts at 1, and `Total` counts every page.
 
 ```json
 { "Kinds": [ { "Kind": "slow-transcode", "Label": "Transcoder too slow", "Count": 3 } ],
   "Rows": [ { "Id": 4, "Kind": "slow-transcode", "KindLabel": "Transcoder too slow", "ItemId": "…", "Title": "Test Movie",
     "Line": null, "UserName": "alice", "Device": "Living Room TV", "Client": "Jellyfin Roku",
-    "FirstSeen": "…", "LastSeen": "…", "Detail": "Transcoding at 14.2 fps against 23.98 fps for 45 s", "OtherDevices": 1 } ] }
+    "FirstSeen": "…", "LastSeen": "…", "Detail": "Transcoding at 14.2 fps against 23.98 fps for 45 s", "OtherDevices": 1 } ],
+  "Page": 1, "PageSize": 50, "Total": 1 }
 ```
 
 Kinds: `freezing`, `slow-transcode`, `low-quality`, `playback-error`.
-Refusal: 400 `unknown-kind`.
+Refusals: 400 `unknown-kind`; 400 `bad-query` for a page below 1.
 
 ### `POST /MediaReports/Admin/Findings/{id}/Dismiss`
 
-Hides a finding. Answers 204. Refusal: 404 `finding-not-found`.
+Hides a finding. Answers 204, with no body. Refusal: 404 `finding-not-found`.
 
 ### `GET /MediaReports/Admin/Settings`
 
